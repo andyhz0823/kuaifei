@@ -39,8 +39,8 @@ func (h *HiddifyInstance) GetProxyInfo(url_test_history *adapter.URLTestHistory,
 		dtag := TrimTagName(tag)
 		out.GroupSelectedTagDisplay = &dtag
 		if balancer, ok := detour.(*balancer.Balancer); ok {
-			if stg := balancer.Strategy(); stg != "lowest-delay" {
-				out.GroupSelectedTagDisplay = &stg
+			if stg := balancer.Strategy(); dtag == stg {
+				out.GroupSelectedTagDisplay = nil
 			}
 		}
 	}
@@ -104,8 +104,8 @@ func (h *HiddifyInstance) GetAllProxiesInfo(hismap map[string]*adapter.URLTestHi
 			continue
 		}
 		if det, ok := outbounds_converted[it.Detour]; ok {
-			it.TagDisplay += " → " + det.TagDisplay
-			it.Type += " → " + det.Type
+			it.TagDisplay = appendDisplayChain(it.TagDisplay, det.TagDisplay)
+			it.Type = appendDisplayChain(it.Type, det.Type)
 		}
 	}
 	for _, it := range box.Outbound().Outbounds() {
@@ -147,8 +147,8 @@ func (h *HiddifyInstance) GetAllProxiesInfo(hismap map[string]*adapter.URLTestHi
 			}
 			pinfo := outbounds_converted[itemTag]
 			pinfo.IsSelected = itemTag == selectedTag
-			if onlyGroupitems && pinfo.GroupSelectedTagDisplay != nil && pinfo.TagDisplay != *pinfo.GroupSelectedTagDisplay {
-				pinfo.TagDisplay = pinfo.TagDisplay + " → " + *pinfo.GroupSelectedTagDisplay
+			if onlyGroupitems && pinfo.GroupSelectedTagDisplay != nil {
+				pinfo.TagDisplay = appendDisplayChain(pinfo.TagDisplay, *pinfo.GroupSelectedTagDisplay)
 			}
 			group.Items = append(group.Items, pinfo)
 			pinfo.IsVisible = !strings.Contains(itemTag, "§hide§")
@@ -176,6 +176,39 @@ func (h *HiddifyInstance) GetAllProxiesInfo(hismap map[string]*adapter.URLTestHi
 
 func TrimTagName(tag string) string {
 	return strings.Trim(strings.Split(tag, "§")[0], " ")
+}
+
+func appendDisplayChain(base string, next string) string {
+	base = strings.TrimSpace(base)
+	next = strings.TrimSpace(next)
+	if base == "" {
+		return next
+	}
+	if next == "" {
+		return base
+	}
+
+	parts := strings.Split(base, "→")
+	for i, part := range parts {
+		parts[i] = strings.TrimSpace(part)
+	}
+	for _, part := range strings.Split(next, "→") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		duplicate := false
+		for _, existing := range parts {
+			if strings.TrimSpace(existing) == part {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, " → ")
 }
 
 func (s *CoreService) OutboundsInfo(req *hcommon.Empty, stream grpc.ServerStreamingServer[OutboundGroupList]) error {

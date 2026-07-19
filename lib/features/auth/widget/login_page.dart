@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:hiddify/core/notification/in_app_notification_controller.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
-import 'package:hiddify/features/profile/data/profile_data_providers.dart';
-import 'package:hiddify/utils/custom_loggers.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
@@ -12,13 +9,21 @@ class LoginPage extends ConsumerStatefulWidget {
   ConsumerState<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends ConsumerState<LoginPage> with AppLogger {
+class _LoginPageState extends ConsumerState<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _panelUrlController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
-  bool _isCreatingProfile = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final auth = ref.read(authNotifierProvider.notifier);
+    _panelUrlController.text = auth.lastPanelUrl ?? '';
+    _emailController.text = auth.lastEmail ?? '';
+    _passwordController.text = auth.lastPassword ?? '';
+  }
 
   @override
   void dispose() {
@@ -31,71 +36,19 @@ class _LoginPageState extends ConsumerState<LoginPage> with AppLogger {
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
 
-    await ref.read(authNotifierProvider.notifier).login(
-      panelUrl: _panelUrlController.text.trim(),
-      email: _emailController.text.trim(),
-      password: _passwordController.text,
-    );
-  }
-
-  Future<void> _createSubscriptionAndNavigate() async {
-    if (_isCreatingProfile) return;
-    _isCreatingProfile = true;
-
-    try {
-      final subscribeUrl = ref.read(authNotifierProvider.notifier).subscribeUrl;
-      loggy.debug('Auto-subscribe: subscribeUrl=$subscribeUrl');
-
-      if (subscribeUrl == null || subscribeUrl.isEmpty) {
-        loggy.warning('Auto-subscribe: no subscribe URL available');
-        ref.read(inAppNotificationControllerProvider).showErrorToast(
-          '未获取到订阅地址，请稍后手动添加',
+    await ref
+        .read(authNotifierProvider.notifier)
+        .login(
+          panelUrl: _panelUrlController.text.trim(),
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
         );
-        return;
-      }
-
-      final repo = await ref.read(profileRepositoryProvider.future);
-
-      loggy.debug('Auto-subscribe: calling upsertRemote with URL');
-      final result = await repo.upsertRemote(subscribeUrl).run();
-
-      result.match(
-        (failure) {
-          loggy.warning('Auto-subscribe failed', failure);
-          ref.read(inAppNotificationControllerProvider).showErrorToast(
-            '订阅失败: ${failure.toString()}',
-          );
-        },
-        (_) {
-          loggy.info('Auto-subscribe succeeded');
-          ref.read(inAppNotificationControllerProvider).showSuccessToast(
-            '订阅成功',
-          );
-        },
-      );
-    } catch (e, st) {
-      loggy.error('Auto-subscribe exception', e, st);
-      ref.read(inAppNotificationControllerProvider).showErrorToast(
-        '订阅异常: ${e.toString()}',
-      );
-    } finally {
-      _isCreatingProfile = false;
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authNotifierProvider);
     final theme = Theme.of(context);
-
-    // After successful login, create subscription and navigate
-    ref.listen(authNotifierProvider, (previous, next) {
-      next.whenData((status) {
-        if (status == AuthStatus.authenticated && previous?.valueOrNull != AuthStatus.authenticated) {
-          _createSubscriptionAndNavigate();
-        }
-      });
-    });
 
     return Scaffold(
       body: Center(
@@ -109,36 +62,28 @@ class _LoginPageState extends ConsumerState<LoginPage> with AppLogger {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Icon(
-                    Icons.vpn_lock_rounded,
-                    size: 64,
-                    color: theme.colorScheme.primary,
-                  ),
+                  Icon(Icons.vpn_lock_rounded, size: 64, color: theme.colorScheme.primary),
                   const SizedBox(height: 8),
                   Text(
                     'kuaifei',
                     textAlign: TextAlign.center,
-                    style: theme.textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     '请登录您的账号',
                     textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                    style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 32),
-
-                  // Panel URL
                   TextFormField(
                     controller: _panelUrlController,
                     keyboardType: TextInputType.url,
                     decoration: const InputDecoration(
                       labelText: '面板地址',
-                      hintText: 'https://your-panel.com',
+                      hintText: 'https://tttt.kuaifei.top',
+                      helperText: '如果登录不上，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top',
+                      helperMaxLines: 2,
                       prefixIcon: Icon(Icons.dns_outlined),
                       border: OutlineInputBorder(),
                     ),
@@ -148,14 +93,12 @@ class _LoginPageState extends ConsumerState<LoginPage> with AppLogger {
                       }
                       final url = value.trim();
                       if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                        return '面板地址需以 http:// 或 https:// 开头';
+                        return '面板地址需要以 http:// 或 https:// 开头';
                       }
                       return null;
                     },
                   ),
                   const SizedBox(height: 16),
-
-                  // Email
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
@@ -173,8 +116,6 @@ class _LoginPageState extends ConsumerState<LoginPage> with AppLogger {
                     },
                   ),
                   const SizedBox(height: 16),
-
-                  // Password
                   TextFormField(
                     controller: _passwordController,
                     obscureText: _obscurePassword,
@@ -183,11 +124,7 @@ class _LoginPageState extends ConsumerState<LoginPage> with AppLogger {
                       prefixIcon: const Icon(Icons.lock_outlined),
                       border: const OutlineInputBorder(),
                       suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility_off
-                              : Icons.visibility,
-                        ),
+                        icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
                         onPressed: () {
                           setState(() {
                             _obscurePassword = !_obscurePassword;
@@ -204,36 +141,39 @@ class _LoginPageState extends ConsumerState<LoginPage> with AppLogger {
                     onFieldSubmitted: (_) => _handleLogin(),
                   ),
                   const SizedBox(height: 24),
-
-                  // Login button
                   FilledButton(
                     onPressed: authState.isLoading ? null : _handleLogin,
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                    child: authState.isLoading || _isCreatingProfile
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
+                    style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                    child: authState.isLoading
+                        ? const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              ),
+                              SizedBox(width: 12),
+                              Text('登录中...', style: TextStyle(fontSize: 16)),
+                            ],
                           )
                         : const Text('登录', style: TextStyle(fontSize: 16)),
                   ),
-
-                  // Error message
+                  const SizedBox(height: 8),
+                  if (authState.isLoading)
+                    TextButton(
+                      onPressed: () {
+                        ref.read(authNotifierProvider.notifier).cancelLogin();
+                      },
+                      child: const Text('取消', style: TextStyle(fontSize: 14)),
+                    ),
                   if (authState.hasError)
                     Padding(
                       padding: const EdgeInsets.only(top: 16),
                       child: Text(
-                        authState.error.toString(),
+                        _formatError(authState.error.toString()),
                         textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: theme.colorScheme.error,
-                          fontSize: 14,
-                        ),
+                        style: TextStyle(color: theme.colorScheme.error, fontSize: 13),
                       ),
                     ),
                 ],
@@ -243,5 +183,34 @@ class _LoginPageState extends ConsumerState<LoginPage> with AppLogger {
         ),
       ),
     );
+  }
+
+  String _formatError(String error) {
+    // Clean up common verbose error messages
+    if (error.contains('SocketException')) {
+      final hostMatch = RegExp(r"Unable to connect to ([^\s:]+)").firstMatch(error);
+      if (hostMatch != null) {
+        final host = hostMatch.group(1);
+        return '无法连接到 $host，请检查面板地址是否正确，或更换域名重试。';
+      }
+      return '网络连接失败，请检查面板地址或网络设置。';
+    }
+    if (error.contains('登录失败，请修改面板域名前缀')) {
+      return '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top';
+    }
+    if (error.contains('DioException')) {
+      return '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top';
+    }
+    if (error.contains('DoH failed')) {
+      return 'DNS解析失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top';
+    }
+    if (error.contains('XMLHttpRequest')) {
+      return '网络请求被拦截，请检查网络环境或更换面板地址。';
+    }
+    // Truncate very long errors
+    if (error.length > 200) {
+      return '${error.substring(0, 200)}...';
+    }
+    return error;
   }
 }

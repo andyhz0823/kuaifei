@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hiddify/core/router/dialog/dialog_notifier.dart';
 import 'package:hiddify/features/proxy/active/ip_widget.dart';
+import 'package:hiddify/features/proxy/utils/proxy_display.dart';
 import 'package:hiddify/gen/fonts.gen.dart';
 import 'package:hiddify/hiddifycore/generated/v2/hcore/hcore.pb.dart';
 import 'package:hiddify/utils/custom_loggers.dart';
@@ -21,7 +22,7 @@ class ProxyTile extends HookConsumerWidget with PresLogger {
     return ListTile(
       // shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       title: Text(
-        proxy.tagDisplay,
+        proxyDisplayTag(proxy),
         overflow: TextOverflow.ellipsis,
         style: PlatformUtils.isWindows ? const TextStyle(fontFamily: FontFamily.emoji) : null,
       ),

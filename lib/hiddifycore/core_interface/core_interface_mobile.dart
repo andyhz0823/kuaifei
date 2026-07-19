@@ -105,13 +105,16 @@ class CoreInterfaceMobile extends CoreInterface with InfraLogger {
     // if (!await waitUntilPort(portBack, false, stop)) return const CoreStatus.stopped(alert: CoreAlert.createService);
     if (!await stop()) return const CoreStatus.stopped(alert: CoreAlert.createService);
     _status.clean();
-    await methodChannel.invokeMethod("start", {
+    final started = await methodChannel.invokeMethod<bool>("start", {
       "path": path,
       "name": name,
       "grpcPort": portBack,
       "startBg": true,
       "debug": _debug,
     });
+    if (started != true) {
+      return const CoreStatus.stopped(alert: CoreAlert.startService, message: "starting background core...");
+    }
 
     _isBgClientAvailable = true;
     loggy.info("Waiting for starting core");

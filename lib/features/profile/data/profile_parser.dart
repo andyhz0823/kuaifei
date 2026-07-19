@@ -66,7 +66,7 @@ class ProfileParser {
             cancelToken: CancelToken(),
             ref: _ref,
           );
-        }, (_, __) => ProfileFailure.unexpected())
+        }, (_, _) => const ProfileFailure.unexpected())
         .flatMap((_) => TaskEither.fromEither(populateHeaders(content: content)))
         .flatMap(
           (populatedHeaders) => TaskEither.fromEither(
@@ -176,6 +176,7 @@ class ProfileParser {
       return MapEntry(key, value);
     });
   }, (err, st) => err is ProfileFailure ? err : ProfileFailure.unexpected(err, st));
+
   Future<void> expandRemoteLinesInParallel({
     required String tempFilePath,
     required DioHttpClient httpClient,
@@ -184,7 +185,28 @@ class ProfileParser {
     int parallelism = 4,
   }) async {
     final content = await File(tempFilePath).readAsString();
-    final lines = content.split('\n');
+
+    // Try to detect and decode base64-encoded subscription content
+    // (common format for Xboard/v2board subscriptions like VLESS:// links)
+    String processedContent = content;
+    final trimmedContent = content.trim();
+    if (trimmedContent.isNotEmpty && _looksLikeBase64(trimmedContent)) {
+      final decodeResult = safeDecodeBase64(trimmedContent);
+      if (decodeResult != trimmedContent &&
+          (decodeResult.startsWith('vmess://') ||
+              decodeResult.startsWith('vless://') ||
+              decodeResult.startsWith('trojan://') ||
+              decodeResult.startsWith('ss://') ||
+              decodeResult.startsWith('hysteria2://') ||
+              decodeResult.startsWith('hy2://') ||
+              decodeResult.startsWith('ssconf://') ||
+              decodeResult.startsWith('tuic://'))) {
+        processedContent = decodeResult;
+        await File(tempFilePath).writeAsString(processedContent);
+      }
+    }
+
+    final lines = processedContent.split('\n');
 
     final results = List<String?>.filled(lines.length, null);
 
@@ -248,13 +270,16 @@ class ProfileParser {
     Map<String, dynamic> contentHeaders,
     Map<String, dynamic> remoteHeaders,
   ) {
+    final normalizedRemoteHeaders = <String, dynamic>{
+      for (final entry in remoteHeaders.entries) entry.key.toLowerCase(): entry.value,
+    };
     for (final entry in contentHeaders.entries) {
-      if (!remoteHeaders.keys.contains(entry.key)) {
-        remoteHeaders[entry.key] = entry.value;
+      if (!normalizedRemoteHeaders.keys.contains(entry.key)) {
+        normalizedRemoteHeaders[entry.key] = entry.value;
       }
     }
     final headers = <String, dynamic>{};
-    for (final entry in remoteHeaders.entries) {
+    for (final entry in normalizedRemoteHeaders.entries) {
       if (allowedProfileHeaders.contains(entry.key) && entry.value != null && entry.value.toString().isNotEmpty) {
         headers[entry.key] = entry.value;
       }
@@ -446,5 +471,29 @@ class ProfileParser {
       }
     });
     return main;
+  }
+
+  /// Checks whether a trimmed string looks like base64-encoded content
+  /// (alphanumeric + `+/=` or `-_`, length multiple of 4, no whitespace/spaces).
+  static bool _looksLikeBase64(String str) {
+    if (str.length < 16) return false;
+    // Skip if it starts with a known URL scheme
+    if (str.startsWith('vmess://') ||
+        str.startsWith('vless://') ||
+        str.startsWith('trojan://') ||
+        str.startsWith('ss://') ||
+        str.startsWith('ssconf://') ||
+        str.startsWith('hysteria2://') ||
+        str.startsWith('hy2://') ||
+        str.startsWith('tuic://') ||
+        str.startsWith('http://') ||
+        str.startsWith('https://') ||
+        str.startsWith('{') ||
+        str.startsWith('#')) {
+      return false;
+    }
+    // Base64 content should only contain these characters
+    final base64Pattern = RegExp(r'^[A-Za-z0-9+/=_-]+$');
+    return base64Pattern.hasMatch(str);
   }
 }

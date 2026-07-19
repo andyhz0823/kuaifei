@@ -1,6 +1,6 @@
 [Setup]
 AppId={{6L903538-42B1-4596-G479-BJ779F21A65D}}
-AppVersion=4.1.2+40108
+AppVersion=4.1.5+40105
 AppName=kuaifei
 AppPublisher=kuaifei
 AppPublisherURL=https://github.com/hiddify/hiddify-app
@@ -8,8 +8,8 @@ AppSupportURL=https://github.com/hiddify/hiddify-app
 AppUpdatesURL=https://github.com/hiddify/hiddify-app
 DefaultDirName={autopf64}\kuaifei
 DisableProgramGroupPage=yes
-OutputDir=dist\4.1.2+40108
-OutputBaseFilename=kuaifei-v4.1.2-8-windows64-setup
+OutputDir=dist\4.1.5+40105
+OutputBaseFilename=kuaifei-v4.1.5-windows64-setup
 Compression=lzma
 SolidCompression=yes
 SetupIconFile=windows\runner\resources\app_icon.ico

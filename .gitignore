@@ -35,6 +35,7 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+/android/build/
 
 # generated files
 **/*.g.dart
@@ -46,6 +47,11 @@ migrate_working_dir/
 **/*.xcframework
 /dist/
 /dist_docker/
+/out/
+/tmp/
+/.codex_tmp_subs/
+/cache.db
+*.bak
 
 /assets/core/*
 !/assets/core/.gitkeep

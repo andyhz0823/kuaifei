@@ -125,10 +125,9 @@ class MethodHandler(private val scope: CoroutineScope) : FlutterPlugin,
 //                            Log.w(TAG, "service is already running")
 //                            return@launch success(true)
 //                        }
-                        Settings.startCoreAfterStartingService = false
+                        Settings.startCoreAfterStartingService = true
 
-                        mainActivity.startService()
-                        success(true)
+                        success(mainActivity.startServiceAndWait())
                     }
                 }
             }
@@ -142,6 +141,7 @@ class MethodHandler(private val scope: CoroutineScope) : FlutterPlugin,
                             Log.w(TAG, "service is not running")
                             //    return@launch success(true)
                         }
+                        mainActivity.cancelPendingStart()
                         BoxService.stop()
                         success(true)
                     }

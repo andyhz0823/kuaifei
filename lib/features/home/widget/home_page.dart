@@ -32,21 +32,7 @@ class HomePage extends HookConsumerWidget {
         //         },
         //       )
         //     : null,
-        title: Row(
-          children: [
-            Assets.images.logo.svg(height: 24),
-            const Gap(8),
-            Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(text: t.common.appTitle),
-                  const TextSpan(text: " "),
-                  const WidgetSpan(child: AppVersionLabel(), alignment: PlaceholderAlignment.middle),
-                ],
-              ),
-            ),
-          ],
-        ),
+        title: Row(children: [Assets.images.logo.svg(height: 24), const Gap(8), const AppVersionLabel()]),
         actions: [
           // IconButton(
           //     onPressed: () => const QuickSettingsRoute().push(context),
@@ -162,8 +148,8 @@ class AppVersionLabel extends HookConsumerWidget {
     final t = ref.watch(translationsProvider).requireValue;
     final theme = Theme.of(context);
 
-    final version = ref.watch(appInfoProvider).requireValue.presentVersion;
-    if (version.isBlank) return const SizedBox();
+    final appInfo = ref.watch(appInfoProvider).requireValue;
+    if (appInfo.version.isBlank) return const SizedBox();
 
     return Semantics(
       label: t.common.version,
@@ -172,7 +158,7 @@ class AppVersionLabel extends HookConsumerWidget {
         decoration: BoxDecoration(color: theme.colorScheme.secondaryContainer, borderRadius: BorderRadius.circular(4)),
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
         child: Text(
-          version,
+          appInfo.displayNameWithVersion,
           textDirection: TextDirection.ltr,
           style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSecondaryContainer),
         ),

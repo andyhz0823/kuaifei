@@ -56,15 +56,15 @@ abstract class ConfigOptions {
 
   static final remoteDnsAddress = PreferencesNotifier.create<String, String>(
     "remote-dns-address",
-    "tcp://8.8.8.8",
+    "https://1.1.1.1/dns-query",
     possibleValues: List.of([
       "local",
       // "udp://223.5.5.5",
       // "223.5.5.5",
       // "udp://1.1.1.2",
+      "https://1.1.1.1/dns-query",
       "tcp://8.8.8.8",
       "tcp://1.1.1.1",
-      "https://1.1.1.1/dns-query",
       "https://dns.cloudflare.com/dns-query",
       "tcp://4.4.2.2",
     ]),
@@ -169,7 +169,7 @@ abstract class ConfigOptions {
     validator: (value) => isPort(value.toString()),
   );
 
-  static final bypassLan = PreferencesNotifier.create<bool, bool>("bypass-lan", false);
+  static final bypassLan = PreferencesNotifier.create<bool, bool>("bypass-lan", true);
 
   static final allowConnectionFromLan = PreferencesNotifier.create<bool, bool>("allow-connection-from-lan", false);
 

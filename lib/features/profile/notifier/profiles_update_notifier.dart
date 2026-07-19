@@ -17,6 +17,7 @@ typedef ProfileUpdateStatus = ({String name, bool success});
 class ForegroundProfilesUpdateNotifier extends _$ForegroundProfilesUpdateNotifier with AppLogger {
   static const prefKey = "profiles_update_check";
   static const interval = Duration(minutes: 15);
+  static const minProfileUpdateInterval = Duration(hours: 1);
 
   @override
   Stream<ProfileUpdateStatus?> build() {
@@ -80,6 +81,10 @@ class ForegroundProfilesUpdateNotifier extends _$ForegroundProfilesUpdateNotifie
 
       await for (final profile in Stream.fromIterable(remoteProfiles)) {
         final updateInterval = profile.options?.updateInterval;
+        if (!force && updateInterval != null && updateInterval < minProfileUpdateInterval) {
+          loggy.debug("skipping profile [${profile.id}] update. unsupported sub-hour interval: [$updateInterval]");
+          continue;
+        }
         if (force || updateInterval != null && updateInterval <= DateTime.now().difference(profile.lastUpdate)) {
           final t = ref.read(translationsProvider).requireValue;
           await ref

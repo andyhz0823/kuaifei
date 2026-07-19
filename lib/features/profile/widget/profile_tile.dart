@@ -1,13 +1,11 @@
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hiddify/core/localization/translations.dart';
 import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/core/model/failures.dart';
-import 'package:hiddify/core/notification/in_app_notification_controller.dart';
 import 'package:hiddify/core/router/bottom_sheets/bottom_sheets_notifier.dart';
 import 'package:hiddify/core/router/dialog/dialog_notifier.dart';
 import 'package:hiddify/core/router/go_router/helper/active_breakpoint_notifier.dart';
@@ -277,7 +275,7 @@ class ProfileSubscriptionInfo extends HookConsumerWidget {
 
   (String, Color?) remainingText(TranslationsEn t, ThemeData theme) {
     if (subInfo.isExpired) {
-      return ('您的订阅已到期，请到 kuaifei.top 续费或新购', theme.colorScheme.error);
+      return ('您的订阅已到期，请到 https://*.kuaifei.top(*换为任意字母或数字，APP登录不上也换为这类地址即可) 续费或新购', theme.colorScheme.error);
     } else if (subInfo.ratio >= 1) {
       return (t.components.subscriptionInfo.noTraffic, theme.colorScheme.error);
     } else if (subInfo.remaining.inDays > 365) {

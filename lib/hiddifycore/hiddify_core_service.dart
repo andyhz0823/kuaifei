@@ -163,7 +163,6 @@ class HiddifyCoreService with InfraLogger {
           StartRequest(
             configPath: path,
             configName: name,
-            // configContent: content,
             disableMemoryLimit: disableMemoryLimit,
           ),
         );
@@ -227,7 +226,6 @@ class HiddifyCoreService with InfraLogger {
   TaskEither<String, Unit> restart(String path, String name, bool disableMemoryLimit) {
     return TaskEither(() async {
       loggy.debug("restarting");
-      // if (!await core.restart(path, name)) {
       try {
         final res = await core.bgClient.restart(
           StartRequest(configPath: path, configName: name, disableMemoryLimit: disableMemoryLimit, delayStart: true),

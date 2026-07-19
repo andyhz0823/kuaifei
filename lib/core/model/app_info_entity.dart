@@ -19,7 +19,9 @@ class AppInfoEntity with _$AppInfoEntity {
 
   String get userAgent => "kuaifei/$version ($operatingSystem) like ClashMeta v2ray sing-box";
 
-  String get presentVersion => environment == Environment.prod ? version : "$version ${environment.name}";
+  String get presentVersion => version;
+
+  String get displayNameWithVersion => "Kuaifei v$version";
 
   /// formats app info for sharing
   String format() =>
