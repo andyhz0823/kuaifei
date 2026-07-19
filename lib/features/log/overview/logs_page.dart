@@ -5,7 +5,6 @@ import 'package:fpdart/fpdart.dart';
 import 'package:gap/gap.dart';
 import 'package:hiddify/core/localization/translations.dart';
 import 'package:hiddify/core/model/failures.dart';
-import 'package:hiddify/core/preferences/general_preferences.dart';
 import 'package:hiddify/core/widget/adaptive_icon.dart';
 import 'package:hiddify/features/log/data/log_data_providers.dart';
 import 'package:hiddify/features/log/model/log_level.dart';
@@ -23,12 +22,11 @@ class LogsPage extends HookConsumerWidget with PresLogger {
     final state = ref.watch(logsOverviewNotifierProvider);
     final notifier = ref.watch(logsOverviewNotifierProvider.notifier);
 
-    final debug = ref.watch(debugModeNotifierProvider);
     final pathResolver = ref.watch(logPathResolverProvider);
 
     final filterController = useTextEditingController(text: state.filter);
 
-    final List<PopupMenuEntry> popupButtons = debug || PlatformUtils.isDesktop
+    final List<PopupMenuEntry> popupButtons = !PlatformUtils.isWeb
         ? [
             PopupMenuItem(
               child: Text(t.pages.logs.shareCoreLogs),

@@ -260,6 +260,16 @@ class XboardSubscriptionProfile {
 
   bool get hasSubscriptionInfo => total != null && expireAt != null;
 
+  bool get isUsable {
+    final expiration = expireDate;
+    if (expiration != null && !expiration.isAfter(DateTime.now())) return false;
+
+    final allowance = total;
+    if (allowance != null && (upload ?? 0) + (download ?? 0) >= allowance) return false;
+
+    return true;
+  }
+
   DateTime? get expireDate {
     final value = expireAt;
     if (value == null || value <= 0) return null;

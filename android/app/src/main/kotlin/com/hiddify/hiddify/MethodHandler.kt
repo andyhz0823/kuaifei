@@ -125,7 +125,9 @@ class MethodHandler(private val scope: CoroutineScope) : FlutterPlugin,
 //                            Log.w(TAG, "service is already running")
 //                            return@launch success(true)
 //                        }
-                        Settings.startCoreAfterStartingService = true
+                        // The service only hosts the background gRPC core. Dart sends the
+                        // actual config path after the service reports that it is ready.
+                        Settings.startCoreAfterStartingService = false
 
                         success(mainActivity.startServiceAndWait())
                     }
@@ -139,7 +141,6 @@ class MethodHandler(private val scope: CoroutineScope) : FlutterPlugin,
                         val started = mainActivity.serviceStatus.value == Status.Started
                         if (!started) {
                             Log.w(TAG, "service is not running")
-                            //    return@launch success(true)
                         }
                         mainActivity.cancelPendingStart()
                         BoxService.stop()

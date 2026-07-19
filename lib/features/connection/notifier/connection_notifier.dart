@@ -141,6 +141,21 @@ class ConnectionNotifier extends _$ConnectionNotifier with AppLogger {
       loggy.info("no active profile, not connecting");
       return;
     }
+
+    final subscription = switch (activeProfile) {
+      RemoteProfileEntity(:final subInfo) => subInfo,
+      LocalProfileEntity() => null,
+    };
+    if (subscription != null && (subscription.isExpired || subscription.remainingBW <= 0)) {
+      const failure = ConnectionFailure.unexpected('套餐已到期或流量已用尽，请重新登录刷新订阅');
+      await ref
+          .read(dialogNotifierProvider.notifier)
+          .showCustomAlertFromErr(failure.present(ref.read(translationsProvider).requireValue));
+      await ref.read(Preferences.startedByUser.notifier).update(false);
+      state = AsyncError(failure, StackTrace.current);
+      return;
+    }
+
     await _connectionRepo.connect(activeProfile, ref.read(Preferences.disableMemoryLimit)).mapLeft((
       ConnectionFailure err,
     ) async {

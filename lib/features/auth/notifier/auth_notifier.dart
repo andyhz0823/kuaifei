@@ -9,7 +9,9 @@ import 'package:hiddify/core/directories/directories_provider.dart';
 import 'package:hiddify/core/preferences/preferences_provider.dart';
 import 'package:hiddify/features/auth/data/xboard_api_client.dart';
 import 'package:hiddify/features/profile/data/profile_data_providers.dart';
+import 'package:hiddify/features/profile/data/profile_repository.dart';
 import 'package:hiddify/features/profile/model/profile_entity.dart';
+import 'package:hiddify/features/profile/notifier/active_profile_notifier.dart';
 import 'package:hiddify/utils/custom_loggers.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -102,11 +104,16 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       await _writePreference('auth_email', email);
       await _persistSubscribeResult(subscribeResult);
 
-      await clearLocalProfileData();
-      try {
-        await _syncStoredSubscriptionsToProfiles(removeLegacyBaseProfile: true, throwOnTotalFailure: true);
-      } catch (e, st) {
-        loggy.warning('Auth: subscription import failed, but login succeeded', e, st);
+      if (subscriptionProfiles.isEmpty) {
+        await clearLocalProfileData();
+        ref.invalidate(activeProfileProvider);
+        loggy.info('Auth: no usable subscriptions; local profiles cleared');
+      } else {
+        try {
+          await _syncStoredSubscriptionsToProfiles(removeObsoleteProfiles: true, throwOnTotalFailure: true);
+        } catch (e, st) {
+          loggy.warning('Auth: subscription import failed, but login succeeded', e, st);
+        }
       }
 
       loggy.debug('Auth: login successful for $email');
@@ -134,12 +141,15 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       await _writePreference('auth_subscribe_url', subscribeResult.subscribeUrl);
     }
 
-    final profiles = subscribeResult.subscriptions.isNotEmpty
-        ? subscribeResult.subscriptions
-        : [
-            if (subscribeResult.subscribeUrl.isNotEmpty)
-              XboardSubscriptionProfile(subscribeUrl: subscribeResult.subscribeUrl),
-          ];
+    final profiles =
+        (subscribeResult.subscriptions.isNotEmpty
+                ? subscribeResult.subscriptions
+                : [
+                    if (subscribeResult.subscribeUrl.isNotEmpty)
+                      XboardSubscriptionProfile(subscribeUrl: subscribeResult.subscribeUrl),
+                  ])
+            .where((profile) => profile.isUsable)
+            .toList(growable: false);
     await _writePreference('auth_subscribe_profiles', jsonEncode(profiles.map((item) => item.toJson()).toList()));
 
     final appConfig = subscribeResult.appConfig;
@@ -183,8 +193,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   }
 
   Future<void> _syncStoredSubscriptionsToProfiles({
-    bool removeLegacyBaseProfile = false,
-    bool onlyIfMissing = false,
+    bool removeObsoleteProfiles = false,
     bool throwOnTotalFailure = false,
   }) async {
     final profiles = subscriptionProfiles;
@@ -192,33 +201,11 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
 
     final repo = await ref.read(profileRepositoryProvider.future);
     final db = ref.read(dbProvider);
-    final existingEntries = await db.select(db.profileEntries).get();
-    final existingUrls = existingEntries.map((entry) => entry.url).whereType<String>().toSet();
+    final desiredUrls = profiles.map((profile) => profile.subscribeUrl).where((url) => url.isNotEmpty).toSet();
 
-    if (onlyIfMissing && profiles.every((profile) => existingUrls.contains(profile.subscribeUrl))) {
-      return;
-    }
-
-    // Remove legacy base profile if we have multiple named subscriptions
-    final legacyBaseUrl = subscribeUrl;
-    if (removeLegacyBaseProfile &&
-        profiles.length > 1 &&
-        legacyBaseUrl != null &&
-        legacyBaseUrl.isNotEmpty &&
-        existingUrls.contains(legacyBaseUrl)) {
-      final legacyEntries = existingEntries.where((entry) => entry.url == legacyBaseUrl).toList(growable: false);
-      for (final entry in legacyEntries) {
-        final deleteResult = await repo.deleteById(entry.id, entry.active).run();
-        deleteResult.match(
-          (failure) => loggy.warning('Auth: failed to delete legacy single-subscription profile', failure),
-          (_) => loggy.info('Auth: removed legacy single-subscription profile ${entry.id}'),
-        );
-      }
-    }
-
-    // Import each subscription as a SEPARATE profile (no merging!)
     loggy.info('Auth: importing ${profiles.length} subscriptions as separate profiles');
     var successCount = 0;
+    final successfulUrls = <String>{};
     Object? lastFailure;
     for (final profile in profiles) {
       final url = profile.subscribeUrl;
@@ -237,6 +224,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
             loggy.warning('Auth: failed to sync subscription from $url', failure);
           case Right():
             successCount++;
+            successfulUrls.add(url);
             await _applySubscriptionInfo(profile);
             loggy.info('Auth: synced profile "$profileName" from $url');
         }
@@ -249,7 +237,71 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     if (throwOnTotalFailure && successCount == 0) {
       throw StateError('Failed to sync any subscription profile: $lastFailure');
     }
+
+    if (successfulUrls.isNotEmpty) {
+      await _activateSyncedProfile(repo, db, profiles, successfulUrls);
+
+      if (removeObsoleteProfiles && successfulUrls.length == desiredUrls.length) {
+        await _removeObsoleteProfiles(repo, db, desiredUrls);
+      }
+
+      // A keep-alive StreamProvider can still expose the profile that was active
+      // before login until its database stream emits. Rebuild it from the final DB state.
+      ref.invalidate(activeProfileProvider);
+    }
+
     loggy.info('Auth: successfully synced $successCount subscription profiles');
+  }
+
+  Future<void> _activateSyncedProfile(
+    ProfileRepository repo,
+    Db db,
+    List<XboardSubscriptionProfile> profiles,
+    Set<String> successfulUrls,
+  ) async {
+    final entries = await db.select(db.profileEntries).get();
+
+    ProfileEntry? selected;
+    for (final entry in entries) {
+      if (entry.active && entry.url != null && successfulUrls.contains(entry.url)) {
+        selected = entry;
+        break;
+      }
+    }
+
+    if (selected == null) {
+      for (final profile in profiles) {
+        if (!successfulUrls.contains(profile.subscribeUrl)) continue;
+        for (final entry in entries) {
+          if (entry.url == profile.subscribeUrl) {
+            selected = entry;
+            break;
+          }
+        }
+        if (selected != null) break;
+      }
+    }
+
+    if (selected == null || selected.active) return;
+
+    final result = await repo.setAsActive(selected.id).run();
+    result.match(
+      (failure) => throw StateError('Failed to activate synced profile ${selected!.id}: $failure'),
+      (_) => loggy.info('Auth: activated synced profile ${selected!.id}'),
+    );
+  }
+
+  Future<void> _removeObsoleteProfiles(ProfileRepository repo, Db db, Set<String> desiredUrls) async {
+    final entries = await db.select(db.profileEntries).get();
+    for (final entry in entries) {
+      if (entry.url != null && desiredUrls.contains(entry.url)) continue;
+
+      final result = await repo.deleteById(entry.id, entry.active).run();
+      result.match(
+        (failure) => loggy.warning('Auth: failed to remove obsolete profile ${entry.id}', failure),
+        (_) => loggy.info('Auth: removed obsolete profile ${entry.id}'),
+      );
+    }
   }
 
   /// Downloads subscription content via HTTP.

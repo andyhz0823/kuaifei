@@ -6,14 +6,14 @@ void main() {
   test('uses one display value for the brand and package version', () {
     const appInfo = AppInfoEntity(
       name: 'kuaifei',
-      version: '4.1.5',
-      buildNumber: '40105',
+      version: '4.1.6',
+      buildNumber: '40106',
       release: Release.general,
       operatingSystem: 'windows',
       operatingSystemVersion: '11',
       environment: Environment.prod,
     );
 
-    expect(appInfo.displayNameWithVersion, 'Kuaifei v4.1.5');
+    expect(appInfo.displayNameWithVersion, 'Kuaifei v4.1.6');
   });
 }
