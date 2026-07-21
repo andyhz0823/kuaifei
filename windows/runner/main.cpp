@@ -48,32 +48,24 @@ bool SendAppLinkToInstance(const std::wstring &title)
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command)
 {
-
-  // Replace "example" with the generated title found as parameter of `window.Create` in this file.
-  // You may ignore the result if you need to create another window.
-  if (SendAppLinkToInstance(L"kuaifei"))
+  HANDLE instance_mutex = ::CreateMutexW(nullptr, TRUE, L"kuaifeiMutex");
+  const DWORD mutex_error = ::GetLastError();
+  if (instance_mutex != nullptr && mutex_error == ERROR_ALREADY_EXISTS)
   {
-    return EXIT_SUCCESS;
-  }
-
-  HANDLE hMutexInstance = CreateMutex(NULL, TRUE, L"kuaifeiMutex");
-  HWND handle = FindWindowA(NULL, "kuaifei");
-
-  if (GetLastError() == ERROR_ALREADY_EXISTS)
-  {
-    flutter::DartProject project(L"data");
-    std::vector<std::string> command_line_arguments = GetCommandLineArguments();
-    project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
-    FlutterWindow window(project);
-    if (window.SendAppLinkToInstance(L"kuaifei"))
+    // The first instance may still be creating its window. Give it a short
+    // grace period, then forward the app link and bring it to the foreground.
+    for (int attempt = 0; attempt < 20; ++attempt)
     {
-      return false;
+      if (SendAppLinkToInstance(L"kuaifei"))
+      {
+        ::CloseHandle(instance_mutex);
+        return EXIT_SUCCESS;
+      }
+      ::Sleep(50);
     }
 
-    WINDOWPLACEMENT place = {sizeof(WINDOWPLACEMENT)};
-    GetWindowPlacement(handle, &place);
-    ShowWindow(handle, SW_NORMAL);
-    return 0;
+    ::CloseHandle(instance_mutex);
+    return EXIT_SUCCESS;
   }
 
   // Attach to console when present (e.g., 'flutter run') or create a
@@ -99,18 +91,29 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Size size(1280, 720);
   if (!window.Create(L"kuaifei", origin, size))
   {
+    if (instance_mutex != nullptr)
+    {
+      ::ReleaseMutex(instance_mutex);
+      ::CloseHandle(instance_mutex);
+    }
+    ::CoUninitialize();
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
 
   ::MSG msg;
-  while (::GetMessage(&msg, nullptr, 0, 0))
+  BOOL message_result;
+  while ((message_result = ::GetMessage(&msg, nullptr, 0, 0)) > 0)
   {
     ::TranslateMessage(&msg);
     ::DispatchMessage(&msg);
   }
 
   ::CoUninitialize();
-  ReleaseMutex(hMutexInstance);
-  return EXIT_SUCCESS;
+  if (instance_mutex != nullptr)
+  {
+    ::ReleaseMutex(instance_mutex);
+    ::CloseHandle(instance_mutex);
+  }
+  return message_result == -1 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

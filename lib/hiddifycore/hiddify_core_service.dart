@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
 
@@ -359,7 +360,8 @@ class HiddifyCoreService with InfraLogger {
     });
   }
 
-  List<LogMessage> logBuffer = [];
+  static const _maxBufferedLogs = 300;
+  final ListQueue<LogMessage> logBuffer = ListQueue<LogMessage>(_maxBufferedLogs);
 
   // SingboxConfigOption? latestOptions;
 
@@ -399,6 +401,7 @@ class HiddifyCoreService with InfraLogger {
     return TaskEither(() async {
       loggy.debug("clearing logs");
       logBuffer.clear();
+      logController.add(const []);
       // final res = await core.bgClient(Empty());
       // if (res.code != ResponseCode.OK) return left("${res.code} ${res.message}");
       return right(unit);
@@ -479,11 +482,11 @@ class HiddifyCoreService with InfraLogger {
     await listenSingle<LogMessage>(listenKey, () {
       return cc.logListener(LogRequest(level: coreLogLevel), options: grpcOptions).map((event) {
         // Handle incoming event
-        logBuffer.add(event);
-        if (logBuffer.length > 300) {
-          logBuffer.removeAt(0);
+        logBuffer.addLast(event);
+        if (logBuffer.length > _maxBufferedLogs) {
+          logBuffer.removeFirst();
         }
-        logController.add(logBuffer);
+        logController.add(List<LogMessage>.unmodifiable(logBuffer));
         // loggy.log(getLogLevel(event.level), event.message);
         event.message.split('\n').forEach((line) {
           loggy.log(getLogLevel(event.level), line);
