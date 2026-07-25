@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"strings"
 
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
@@ -136,6 +138,7 @@ func patchEndpoint(base *option.Endpoint, configOpt HiddifyOptions, staticIPs *m
 }
 func patchOutbound(base option.Outbound, configOpt HiddifyOptions, staticIPs *map[string][]string) (*option.Outbound, error) {
 
+	patchOriginDomainResolver(&base, configOpt.OriginDNS, staticIPs)
 	base = patchOutboundTLSTricks(base, configOpt)
 
 	// switch base.Type {
@@ -145,6 +148,97 @@ func patchOutbound(base option.Outbound, configOpt HiddifyOptions, staticIPs *ma
 	// base = patchOutboundXray(base, configOpt, *staticIPs)
 
 	return &base, nil
+}
+
+func patchOriginDomainResolver(base *option.Outbound, records map[string][]string, staticIPs *map[string][]string) {
+	opts, ok := base.Options.(option.ServerOptionsWrapper)
+	if !ok {
+		return
+	}
+
+	serverDomain := normalizeOriginHost(opts.TakeServerOptions().Server)
+	addresses := matchOriginDNS(records, serverDomain)
+	if len(addresses) == 0 {
+		return
+	}
+	(*staticIPs)[serverDomain] = addresses
+
+	if dialerOpts, ok := base.Options.(option.DialerOptionsWrapper); ok {
+		dialer := dialerOpts.TakeDialerOptions()
+		dialer.DomainResolver = &option.DomainResolveOptions{
+			Server:   DNSStaticTag,
+			Strategy: option.DomainStrategy(C.DomainStrategyPreferIPv4),
+		}
+		dialerOpts.ReplaceDialerOptions(dialer)
+	}
+}
+
+func normalizeOriginHost(host string) string {
+	domain := strings.TrimSpace(strings.ToLower(host))
+	if domain == "" {
+		return ""
+	}
+	if strings.Contains(domain, "://") {
+		if parsedHost, err := getHostnameIfNotIP(domain); err == nil {
+			domain = parsedHost
+		}
+	}
+	domain = strings.Trim(domain, "[]")
+	if net.ParseIP(domain) != nil {
+		return ""
+	}
+	return strings.TrimSuffix(domain, ".")
+}
+
+func matchOriginDNS(records map[string][]string, host string) []string {
+	host = normalizeOriginHost(host)
+	if host == "" || len(records) == 0 {
+		return nil
+	}
+
+	var bestPattern string
+	var bestAddresses []string
+	for rawPattern, rawAddresses := range records {
+		pattern := strings.TrimSpace(strings.ToLower(rawPattern))
+		pattern = strings.TrimSuffix(pattern, ".")
+		addresses := validOriginAddresses(rawAddresses)
+		if len(addresses) == 0 {
+			continue
+		}
+
+		if pattern == host {
+			return addresses
+		}
+		if !strings.HasPrefix(pattern, "*.") {
+			continue
+		}
+		suffix := pattern[1:]
+		if len(host) <= len(suffix) || !strings.HasSuffix(host, suffix) {
+			continue
+		}
+		if len(pattern) > len(bestPattern) {
+			bestPattern = pattern
+			bestAddresses = addresses
+		}
+	}
+	return bestAddresses
+}
+
+func validOriginAddresses(addresses []string) []string {
+	valid := make([]string, 0, len(addresses))
+	seen := make(map[string]struct{}, len(addresses))
+	for _, address := range addresses {
+		address = strings.TrimSpace(address)
+		if net.ParseIP(address) == nil {
+			continue
+		}
+		if _, exists := seen[address]; exists {
+			continue
+		}
+		seen[address] = struct{}{}
+		valid = append(valid, address)
+	}
+	return valid
 }
 
 // func patchOutboundXray(base option.Outbound, configOpt HiddifyOptions, staticIpsDns map[string][]string) outboundMap {

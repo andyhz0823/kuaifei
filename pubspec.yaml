@@ -1,7 +1,7 @@
 name: hiddify
 description: Cross Platform Multi Protocol Proxy Frontend.
 publish_to: "none"
-version: 4.1.6+40106
+version: 4.1.8+40108
 
 environment:
   sdk: ^3.10.4
@@ -79,6 +79,7 @@ dependencies:
   version: ^3.0.2
   posix: ^6.0.1
   qr_flutter: ^4.1.0
+  cryptography: ^2.7.0
   flutter_displaymode: ^0.6.0
   flutter_loggy_dio: ^3.1.0
   dio_smart_retry: ^7.0.1

@@ -1,15 +1,15 @@
 [Setup]
 AppId={{6L903538-42B1-4596-G479-BJ779F21A65D}}
-AppVersion=4.1.6+40106
-AppName=kuaifei
-AppPublisher=kuaifei
-AppPublisherURL=https://github.com/hiddify/hiddify-app
-AppSupportURL=https://github.com/hiddify/hiddify-app
-AppUpdatesURL=https://github.com/hiddify/hiddify-app
-DefaultDirName={autopf64}\kuaifei
+AppVersion=4.1.8
+AppName=Kuaifei
+AppPublisher=Kuaifei
+AppPublisherURL=https://github.com/andyhz0823/Xboard
+AppSupportURL=https://github.com/andyhz0823/Xboard
+AppUpdatesURL=https://github.com/andyhz0823/Xboard/releases/latest
+DefaultDirName={autopf64}\Kuaifei
 DisableProgramGroupPage=yes
-OutputDir=dist\4.1.6+40106
-OutputBaseFilename=kuaifei-v4.1.6-windows64-setup
+OutputDir=dist\4.1.8+40108
+OutputBaseFilename=Kuaifei-v4.1.8-windows-x64-setup
 Compression=lzma
 SolidCompression=yes
 SetupIconFile=windows\runner\resources\app_icon.ico
@@ -30,9 +30,9 @@ Name: "launchAtStartup"; Description: "Auto-start at login"; GroupDescription: "
 Source: "build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\kuaifei"; Filename: "{app}\kuaifei.exe"
-Name: "{autodesktop}\kuaifei"; Filename: "{app}\kuaifei.exe"; Tasks: desktopicon
-Name: "{userstartup}\kuaifei"; Filename: "{app}\kuaifei.exe"; WorkingDir: "{app}"; Tasks: launchAtStartup
+Name: "{autoprograms}\Kuaifei"; Filename: "{app}\kuaifei.exe"
+Name: "{autodesktop}\Kuaifei"; Filename: "{app}\kuaifei.exe"; Tasks: desktopicon
+Name: "{userstartup}\Kuaifei"; Filename: "{app}\kuaifei.exe"; WorkingDir: "{app}"; Tasks: launchAtStartup
 
 [Run]
 Filename: "{app}\kuaifei.exe"; Description: "Launch kuaifei"; Flags: runascurrentuser nowait postinstall skipifsilent

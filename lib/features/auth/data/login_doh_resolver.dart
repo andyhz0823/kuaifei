@@ -49,13 +49,6 @@ class LoginDohResolver {
     ),
   ];
 
-  static final _kuaifeiFallbackAddresses = <InternetAddress>[
-    InternetAddress('104.21.61.105', type: InternetAddressType.IPv4),
-    InternetAddress('172.67.208.244', type: InternetAddressType.IPv4),
-    InternetAddress('2606:4700:3033::6815:3d69', type: InternetAddressType.IPv6),
-    InternetAddress('2606:4700:3033::ac43:d0f4', type: InternetAddressType.IPv6),
-  ];
-
   Future<LoginDnsResolution> resolve(String host, {bool includeHttps = false}) async {
     final normalizedHost = host.toLowerCase();
     final cached = _cache[normalizedHost];
@@ -67,33 +60,23 @@ class LoginDohResolver {
     for (final provider in _providers) {
       try {
         final result = await _resolveWithProvider(provider, normalizedHost, includeHttps: includeHttps);
-        final addresses = result.addresses;
+        final resolvedAddresses = result.addresses;
         final hasHttpsRecord = result.hasHttpsRecord;
         final hasEchConfig = result.hasEchConfig;
 
         final unique = <String, InternetAddress>{};
-        for (final address in addresses) {
+        for (final address in resolvedAddresses) {
           unique[address.address] = address;
         }
 
-        final trustedAddresses = _filterTrustedAddresses(normalizedHost, unique.values);
-        if (trustedAddresses.isEmpty && unique.isNotEmpty && _requiresTrustedCloudflareAddress(normalizedHost)) {
-          errors.add(
-            StateError(
-              '${provider.uri} returned non-Cloudflare addresses for $normalizedHost: '
-              '${unique.keys.join(', ')}',
-            ),
-          );
-          continue;
-        }
-
-        if (trustedAddresses.isEmpty && !hasHttpsRecord) {
+        final addresses = unique.values.toList(growable: false);
+        if (addresses.isEmpty && !hasHttpsRecord) {
           continue;
         }
 
         final resolution = LoginDnsResolution(
           host: normalizedHost,
-          addresses: trustedAddresses,
+          addresses: addresses,
           hasHttpsRecord: hasHttpsRecord,
           hasEchConfig: hasEchConfig,
         );
@@ -102,12 +85,6 @@ class LoginDohResolver {
       } catch (error) {
         errors.add(error);
       }
-    }
-
-    final fallback = _fallbackResolution(normalizedHost, includeHttps: includeHttps);
-    if (fallback != null) {
-      _cache[normalizedHost] = _CachedResolution(fallback, DateTime.now().add(const Duration(minutes: 2)));
-      return fallback;
     }
 
     throw StateError('DoH failed for $normalizedHost: ${errors.isEmpty ? 'empty response' : errors.last}');
@@ -207,12 +184,8 @@ class LoginDohResolver {
     final bootstrap = provider.bootstrapAddresses.map(InternetAddress.new).toList(growable: false);
     final client = HttpClient()
       ..connectionTimeout = timeout
-      ..findProxy = (requestUri) => HttpClient.findProxyFromEnvironment(requestUri);
+      ..findProxy = (requestUri) => 'DIRECT';
     client.connectionFactory = (requestUri, proxyHost, proxyPort) async {
-      if (proxyHost != null && proxyPort != null) {
-        return ConnectionTask.fromSocket(Socket.connect(proxyHost, proxyPort, timeout: timeout), () {});
-      }
-
       final host = requestUri.host.toLowerCase();
       if (host != uri.host.toLowerCase()) {
         return ConnectionTask.fromSocket(Socket.connect(host, requestUri.port, timeout: timeout), () {});
@@ -277,56 +250,6 @@ class LoginDohResolver {
       hasEchConfig = hasEchConfig || data.contains(' ech=') || data.startsWith('ech=');
     }
     return _HttpsInfo(hasHttpsRecord: hasHttpsRecord, hasEchConfig: hasEchConfig);
-  }
-
-  List<InternetAddress> _filterTrustedAddresses(String host, Iterable<InternetAddress> addresses) {
-    final list = addresses.toList(growable: false);
-    if (!_requiresTrustedCloudflareAddress(host)) return list;
-    return list.where(_isCloudflareAddress).toList(growable: false);
-  }
-
-  bool _requiresTrustedCloudflareAddress(String host) => host == 'kuaifei.top' || host.endsWith('.kuaifei.top');
-
-  LoginDnsResolution? _fallbackResolution(String host, {required bool includeHttps}) {
-    if (!_requiresTrustedCloudflareAddress(host)) return null;
-    return LoginDnsResolution(
-      host: host,
-      addresses: _kuaifeiFallbackAddresses,
-      hasHttpsRecord: false,
-      hasEchConfig: false,
-    );
-  }
-
-  bool _isCloudflareAddress(InternetAddress address) {
-    if (address.type == InternetAddressType.IPv6) {
-      final value = address.address.toLowerCase();
-      return value.startsWith('2606:4700:') ||
-          value.startsWith('2400:cb00:') ||
-          value.startsWith('2405:8100:') ||
-          value.startsWith('2803:f800:') ||
-          value.startsWith('2a06:98') ||
-          value.startsWith('2c0f:f248:');
-    }
-
-    final parts = address.address.split('.').map(int.tryParse).toList(growable: false);
-    if (parts.length != 4 || parts.any((part) => part == null)) return false;
-    final a = parts[0]!;
-    final b = parts[1]!;
-    final c = parts[2]!;
-    return (a == 103 && b == 21 && c >= 244 && c <= 247) ||
-        (a == 103 && b == 22 && c >= 200 && c <= 203) ||
-        (a == 103 && b == 31 && c >= 4 && c <= 7) ||
-        (a == 104 && b >= 16 && b <= 27) ||
-        (a == 108 && b == 162 && c >= 192) ||
-        (a == 131 && b == 0 && c >= 72 && c <= 75) ||
-        (a == 141 && b == 101 && c >= 64 && c <= 127) ||
-        (a == 162 && (b == 158 || b == 159)) ||
-        (a == 172 && b >= 64 && b <= 71) ||
-        (a == 173 && b == 245 && c >= 48 && c <= 63) ||
-        (a == 188 && b == 114 && c >= 96 && c <= 111) ||
-        (a == 190 && b == 93 && c >= 240) ||
-        (a == 197 && b == 234 && c >= 240 && c <= 243) ||
-        (a == 198 && b == 41 && c >= 128);
   }
 
   Uint8List _buildDnsQuery(String host, int recordType) {

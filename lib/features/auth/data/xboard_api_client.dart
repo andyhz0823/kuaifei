@@ -10,16 +10,12 @@ class XboardApiClient with InfraLogger {
   static const requestTimeout = Duration(seconds: 10);
 
   final Dio _dio;
-  final Dio? _originDio;
   final Uri _baseUri;
   final LoginDohResolver _resolver;
-  final String? _originIp;
 
   XboardApiClient({required String baseUrl})
     : _baseUri = Uri.parse(baseUrl.replaceAll(RegExp(r'/+$'), '')),
       _resolver = LoginDohResolver(),
-      _originIp = _originIpForHost(Uri.parse(baseUrl.replaceAll(RegExp(r'/+$'), '')).host),
-      _originDio = _createOriginDio(Uri.parse(baseUrl.replaceAll(RegExp(r'/+$'), ''))),
       _dio = Dio(
         BaseOptions(
           baseUrl: baseUrl.replaceAll(RegExp(r'/+$'), ''),
@@ -33,59 +29,19 @@ class XboardApiClient with InfraLogger {
       createHttpClient: () {
         final client = HttpClient()
           ..connectionTimeout = requestTimeout
-          ..findProxy = (uri) => HttpClient.findProxyFromEnvironment(uri);
+          ..findProxy = (uri) => 'DIRECT';
         client.connectionFactory = (uri, proxyHost, proxyPort) async {
-          if (proxyHost != null && proxyPort != null) {
-            return ConnectionTask.fromSocket(Socket.connect(proxyHost, proxyPort, timeout: requestTimeout), () {});
-          }
-
-          final resolution = await _resolver.resolve(uri.host, includeHttps: true);
-          final addresses = resolution.addresses;
-          if (addresses.isEmpty) {
-            return ConnectionTask.fromSocket(Socket.connect(uri.host, uri.port, timeout: requestTimeout), () {});
-          }
-
-          return ConnectionTask.fromSocket(_connectFirstAvailable(addresses, uri.port), () {});
+          return ConnectionTask.fromSocket(_connectForUri(uri), () {});
         };
         return client;
       },
     );
   }
 
-  static Dio? _createOriginDio(Uri baseUri) {
-    final originIp = _originIpForHost(baseUri.host);
-    if (originIp == null) return null;
-
-    final originBaseUri = baseUri.replace(host: originIp);
-    final dio = Dio(
-      BaseOptions(
-        baseUrl: originBaseUri.toString(),
-        connectTimeout: requestTimeout,
-        sendTimeout: requestTimeout,
-        receiveTimeout: requestTimeout,
-        headers: {'User-Agent': 'kuaifei', 'Accept': 'application/json', HttpHeaders.hostHeader: baseUri.host},
-      ),
-    );
-    dio.httpClientAdapter = IOHttpClientAdapter(
-      createHttpClient: () {
-        final client = HttpClient()
-          ..connectionTimeout = requestTimeout
-          ..findProxy = (uri) => 'DIRECT';
-        client.badCertificateCallback = (certificate, host, port) => host == originIp;
-        return client;
-      },
-    );
-    return dio;
-  }
-
-  static String? _originIpForHost(String host) {
-    return KuaifeiOrigin.ipForHost(host);
-  }
-
   Future<void> prewarm() async {
-    final originIp = _originIp;
-    if (originIp != null) {
-      loggy.debug('Auth: using origin IP fallback for ${_baseUri.host} via $originIp');
+    final cached = KuaifeiOrigin.addressesForHost(_baseUri.host);
+    if (cached.isNotEmpty) {
+      loggy.debug('Auth: loaded cached origin routing for ${_baseUri.host}: ${cached.join(', ')}');
       return;
     }
 
@@ -96,11 +52,35 @@ class XboardApiClient with InfraLogger {
     );
   }
 
-  Future<Socket> _connectFirstAvailable(List<InternetAddress> addresses, int port) async {
+  Future<Socket> _connectForUri(Uri uri) async {
+    final dohFuture = _resolver.resolve(uri.host, includeHttps: true);
+    final cached = KuaifeiOrigin.addressesForHost(uri.host).map(InternetAddress.new).toList(growable: false);
+    Object? cachedError;
+    if (cached.isNotEmpty) {
+      try {
+        return await _connectFirstAvailable(cached, uri.port, timeout: const Duration(seconds: 3));
+      } catch (error) {
+        cachedError = error;
+      }
+    }
+
+    try {
+      final resolution = await dohFuture;
+      return await _connectFirstAvailable(resolution.addresses, uri.port);
+    } catch (error) {
+      throw SocketException('Cached and DoH endpoints failed for ${uri.host}: ${cachedError ?? error}');
+    }
+  }
+
+  Future<Socket> _connectFirstAvailable(
+    List<InternetAddress> addresses,
+    int port, {
+    Duration timeout = requestTimeout,
+  }) async {
     Object? lastError;
     for (final address in addresses) {
       try {
-        return await Socket.connect(address, port, timeout: requestTimeout);
+        return await Socket.connect(address, port, timeout: timeout);
       } catch (error) {
         lastError = error;
       }
@@ -110,12 +90,10 @@ class XboardApiClient with InfraLogger {
 
   void setToken(String token) {
     _dio.options.headers['Authorization'] = 'Bearer $token';
-    _originDio?.options.headers['Authorization'] = 'Bearer $token';
   }
 
   void clearToken() {
     _dio.options.headers.remove('Authorization');
-    _originDio?.options.headers.remove('Authorization');
   }
 
   Map<String, dynamic>? _responseBody(Response<dynamic> response) {
@@ -171,7 +149,7 @@ class XboardApiClient with InfraLogger {
 
     final subscriptions = XboardSubscriptionProfile.fromList(data['subscriptions']);
     final fallbackProfile = XboardSubscriptionProfile(
-      subscribeUrl: data['subscribe_url']?.toString() ?? '',
+      subscribeUrl: normalizeHttpUrl(data['subscribe_url']?.toString() ?? ''),
       name: data['plan'] is Map ? (data['plan'] as Map)['name']?.toString() : null,
       planId: intOrNull(data['plan_id']),
       upload: intOrNull(data['u']),
@@ -199,12 +177,13 @@ class XboardApiClient with InfraLogger {
     return int.tryParse(value?.toString() ?? '');
   }
 
-  Future<Response<dynamic>> _requestWithOriginFallback(Future<Response<dynamic>> Function(Dio dio) request) {
-    final originDio = _originDio;
-    if (originDio != null) {
-      return request(originDio);
-    }
+  static String normalizeHttpUrl(String url) {
+    final normalized = url.trim();
+    if (normalized.isEmpty || normalized.contains('://')) return normalized;
+    return 'https://$normalized';
+  }
 
+  Future<Response<dynamic>> _requestWithOriginFallback(Future<Response<dynamic>> Function(Dio dio) request) {
     return request(_dio);
   }
 }
@@ -295,7 +274,7 @@ class XboardSubscriptionProfile {
         .map((item) => Map<String, dynamic>.from(item))
         .map(
           (item) => XboardSubscriptionProfile(
-            subscribeUrl: item['subscribe_url']?.toString() ?? '',
+            subscribeUrl: XboardApiClient.normalizeHttpUrl(item['subscribe_url']?.toString() ?? ''),
             name: item['plan_name']?.toString(),
             planId: XboardApiClient.intOrNull(item['plan_id']),
             subscriptionId: XboardApiClient.intOrNull(item['id']),
@@ -327,8 +306,9 @@ class XboardAppConfig {
   final String? purchaseUrl;
   final String? contactEmail;
   final String? contactText;
+  final OriginDnsConfig? originDns;
 
-  XboardAppConfig({this.purchaseUrl, this.contactEmail, this.contactText});
+  XboardAppConfig({this.purchaseUrl, this.contactEmail, this.contactText, this.originDns});
 
   factory XboardAppConfig.fromJson(dynamic value) {
     if (value is! Map) return XboardAppConfig();
@@ -337,6 +317,7 @@ class XboardAppConfig {
       purchaseUrl: json['purchase_url']?.toString() ?? json['renew_url']?.toString(),
       contactEmail: json['contact_email']?.toString() ?? json['email']?.toString(),
       contactText: json['contact_text']?.toString(),
+      originDns: json['origin_dns'] == null ? null : OriginDnsConfig.fromJson(json['origin_dns']),
     );
   }
 }

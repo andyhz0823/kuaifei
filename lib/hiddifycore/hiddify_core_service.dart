@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:fpdart/fpdart.dart';
 import 'package:grpc/grpc.dart';
 import 'package:hiddify/core/directories/directories_provider.dart';
+import 'package:hiddify/core/http_client/kuaifei_origin.dart';
 import 'package:hiddify/core/model/directories.dart';
 import 'package:hiddify/core/notification/in_app_notification_controller.dart';
 import 'package:hiddify/core/preferences/general_preferences.dart';
@@ -118,13 +119,14 @@ class HiddifyCoreService with InfraLogger {
       loggy.debug("changing options");
       // latestOptions = options;
       try {
+        final settings = options.toJson();
+        settings['origin-dns'] = KuaifeiOrigin.exportCoreRecords();
+        final settingsJson = jsonEncode(settings);
         final res = await core.fgClient.changeHiddifySettings(
-          ChangeHiddifySettingsRequest(hiddifySettingsJson: jsonEncode(options.toJson())),
+          ChangeHiddifySettingsRequest(hiddifySettingsJson: settingsJson),
         );
         if (res.messageType != MessageType.EMPTY) return left("${res.messageType} ${res.message}");
-        await core.bgClient.changeHiddifySettings(
-          ChangeHiddifySettingsRequest(hiddifySettingsJson: jsonEncode(options.toJson())),
-        );
+        await core.bgClient.changeHiddifySettings(ChangeHiddifySettingsRequest(hiddifySettingsJson: settingsJson));
       } on GrpcError catch (e) {
         if (e.code == StatusCode.unavailable) {
           loggy.debug("background core is not started yet! $e");
@@ -161,11 +163,7 @@ class HiddifyCoreService with InfraLogger {
       // loggy.debug("starting with content: $content");
       try {
         final res = await core.bgClient.start(
-          StartRequest(
-            configPath: path,
-            configName: name,
-            disableMemoryLimit: disableMemoryLimit,
-          ),
+          StartRequest(configPath: path, configName: name, disableMemoryLimit: disableMemoryLimit),
         );
         ref.read(coreRestartSignalProvider.notifier).restart();
         if (res.messageType != MessageType.ALREADY_STARTED && res.messageType != MessageType.EMPTY) {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,8 +7,11 @@ import 'package:fpdart/fpdart.dart';
 import 'package:hiddify/core/db/db.dart';
 import 'package:hiddify/core/db/provider/db_providers.dart';
 import 'package:hiddify/core/directories/directories_provider.dart';
+import 'package:hiddify/core/http_client/kuaifei_origin.dart';
 import 'package:hiddify/core/preferences/preferences_provider.dart';
+import 'package:hiddify/features/auth/data/origin_dns_bootstrap.dart';
 import 'package:hiddify/features/auth/data/xboard_api_client.dart';
+import 'package:hiddify/features/connection/notifier/connection_notifier.dart';
 import 'package:hiddify/features/profile/data/profile_data_providers.dart';
 import 'package:hiddify/features/profile/data/profile_repository.dart';
 import 'package:hiddify/features/profile/model/profile_entity.dart';
@@ -28,9 +32,12 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   static const _legacyPurchaseUrl = 'https://kuaifei.top';
   static const _defaultContactEmail = 'wahiya562@gmail.com';
   static const _legacyContactEmail = 'mahiya562@gmail.com';
+  Timer? _originRefreshTimer;
 
   @override
   Future<AuthStatus> build() async {
+    KuaifeiOrigin.restore(_prefs);
+    ref.onDispose(() => _originRefreshTimer?.cancel());
     // Don't auto-login on startup — show the login page, let user click login
     return AuthStatus.idle;
   }
@@ -87,6 +94,11 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       final normalizedUrl = panelUrl.replaceAll(RegExp(r'/+$'), '');
       await _rememberLastLoginInput(panelUrl: normalizedUrl, email: email, password: password);
 
+      final panelHost = Uri.tryParse(normalizedUrl)?.host ?? '';
+      if (KuaifeiOrigin.addressesForHost(panelHost).isEmpty) {
+        await OriginDnsBootstrap.refresh(_prefs);
+      }
+
       final client = XboardApiClient(baseUrl: normalizedUrl);
 
       loggy.debug('Auth: logging in to $normalizedUrl as $email');
@@ -98,6 +110,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
         return (loginResult: loginResult, subscribeResult: subscribeResult);
       })().timeout(_loginTimeout, onTimeout: () => throw XboardApiException(_loginTimeoutMessage));
 
+      await _persistOriginDns(subscribeResult);
       await _writePreference('auth_panel_url', normalizedUrl);
       await _writePreference('auth_sanctum_token', loginResult.sanctumToken);
       await _writePreference('auth_subscription_token', loginResult.subscriptionToken);
@@ -117,6 +130,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       }
 
       loggy.debug('Auth: login successful for $email');
+      _scheduleOriginRefresh();
       return AuthStatus.authenticated;
     });
   }
@@ -157,6 +171,43 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     await _writePreference('auth_contact_email', _normalizeContactEmail(appConfig.contactEmail));
     if (appConfig.contactText?.isNotEmpty == true) {
       await _writePreference('auth_contact_text', appConfig.contactText!);
+    }
+  }
+
+  Future<bool> _persistOriginDns(XboardSubscribeResult subscribeResult) async {
+    final config = subscribeResult.appConfig.originDns;
+    if (config == null || !config.isUsable) return false;
+    final previousRevision = KuaifeiOrigin.config.revision;
+    final saved = await KuaifeiOrigin.replace(_prefs, config);
+    if (saved) {
+      loggy.info('Auth: applied origin DNS revision ${config.revision} from ${config.source}');
+    }
+    return saved && previousRevision != config.revision;
+  }
+
+  void _scheduleOriginRefresh() {
+    _originRefreshTimer?.cancel();
+    final interval = KuaifeiOrigin.config.refreshInterval;
+    _originRefreshTimer = Timer.periodic(interval, (_) => _refreshOriginDnsAndProfiles());
+  }
+
+  Future<void> _refreshOriginDnsAndProfiles() async {
+    final savedPanelUrl = panelUrl;
+    final token = sanctumToken;
+    if (savedPanelUrl == null || token == null || token.isEmpty) return;
+
+    try {
+      final client = XboardApiClient(baseUrl: savedPanelUrl)..setToken(token);
+      final result = await client.getSubscribe().timeout(_loginTimeout);
+      final changed = await _persistOriginDns(result);
+      await _persistSubscribeResult(result);
+      await _syncStoredSubscriptionsToProfiles();
+      if (changed) {
+        await ref.read(connectionNotifierProvider.notifier).reconnect(await ref.read(activeProfileProvider.future));
+        _scheduleOriginRefresh();
+      }
+    } catch (error, stackTrace) {
+      loggy.warning('Auth: periodic origin DNS refresh failed; keeping last-known-good config', error, stackTrace);
     }
   }
 
@@ -245,12 +296,45 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
         await _removeObsoleteProfiles(repo, db, desiredUrls);
       }
 
+      await _normalizeSyncedProfileNames(db, profiles, successfulUrls);
+
       // A keep-alive StreamProvider can still expose the profile that was active
       // before login until its database stream emits. Rebuild it from the final DB state.
       ref.invalidate(activeProfileProvider);
     }
 
     loggy.info('Auth: successfully synced $successCount subscription profiles');
+  }
+
+  Future<void> _normalizeSyncedProfileNames(
+    Db db,
+    List<XboardSubscriptionProfile> profiles,
+    Set<String> successfulUrls,
+  ) async {
+    final entries = await db.select(db.profileEntries).get();
+    for (final profile in profiles) {
+      final expectedName = profile.name?.trim();
+      if (expectedName == null || expectedName.isEmpty || !successfulUrls.contains(profile.subscribeUrl)) {
+        continue;
+      }
+
+      ProfileEntry? entry;
+      for (final item in entries) {
+        if (item.url == profile.subscribeUrl) {
+          entry = item;
+          break;
+        }
+      }
+      if (entry == null || entry.name == expectedName) continue;
+      final currentEntry = entry;
+
+      final hasNameConflict = entries.any((item) => item.id != currentEntry.id && item.name == expectedName);
+      if (hasNameConflict) continue;
+
+      await (db.update(
+        db.profileEntries,
+      )..where((tbl) => tbl.id.equals(currentEntry.id))).write(ProfileEntriesCompanion(name: Value(expectedName)));
+    }
   }
 
   Future<void> _activateSyncedProfile(
@@ -344,6 +428,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   }
 
   Future<void> logout() async {
+    _originRefreshTimer?.cancel();
     await _removePreference('auth_panel_url');
     await _removePreference('auth_sanctum_token');
     await _removePreference('auth_subscription_token');

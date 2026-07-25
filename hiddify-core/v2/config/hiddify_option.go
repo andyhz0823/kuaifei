@@ -23,12 +23,13 @@ type HiddifyOptions struct {
 	BalancerStrategy        string `json:"balancer-strategy,omitempty" overridable:"true"`
 	// GeoIPPath        string      `json:"geoip-path"`
 	// GeoSitePath      string      `json:"geosite-path"`
-	Rules     []Rule      `json:"rules,omitempty" overridable:"true"`
-	Warp      WarpOptions `json:"warp,omitempty"`
-	Warp2     WarpOptions `json:"warp2,omitempty"`
-	Mux       MuxOptions  `json:"mux,omitempty" overridable:"true"`
-	TLSTricks TLSTricks   `json:"tls-tricks,omitempty"`
-	EnableNTP bool        `json:"enable-ntp,omitempty"`
+	Rules     []Rule              `json:"rules,omitempty" overridable:"true"`
+	Warp      WarpOptions         `json:"warp,omitempty"`
+	Warp2     WarpOptions         `json:"warp2,omitempty"`
+	Mux       MuxOptions          `json:"mux,omitempty" overridable:"true"`
+	TLSTricks TLSTricks           `json:"tls-tricks,omitempty"`
+	EnableNTP bool                `json:"enable-ntp,omitempty"`
+	OriginDNS map[string][]string `json:"origin-dns,omitempty"`
 
 	DNSOptions
 	InboundOptions

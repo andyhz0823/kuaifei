@@ -10,7 +10,7 @@ import 'package:hiddify/utils/custom_loggers.dart';
 
 class DioHttpClient with InfraLogger {
   final Map<String, Dio> _dio = {};
-  final Map<String, Dio> _originDio = {};
+  late final Dio _mappedDio;
   final Duration _timeout;
 
   DioHttpClient({required Duration timeout, required this.userAgent, required bool debug}) : _timeout = timeout {
@@ -49,6 +49,26 @@ class DioHttpClient with InfraLogger {
         },
       );
     }
+
+    _mappedDio = Dio(
+      BaseOptions(
+        connectTimeout: timeout,
+        sendTimeout: timeout,
+        receiveTimeout: timeout,
+        headers: {"User-Agent": userAgent},
+      ),
+    );
+    _mappedDio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final client = HttpClient()
+          ..connectionTimeout = timeout
+          ..findProxy = (_) => 'DIRECT';
+        client.connectionFactory = (uri, proxyHost, proxyPort) async {
+          return ConnectionTask.fromSocket(_connectMapped(uri), () {});
+        };
+        return client;
+      },
+    );
 
     if (debug) {
       // _dio.interceptors.add(LoggyDioInterceptor(requestHeader: true));
@@ -94,12 +114,11 @@ class DioHttpClient with InfraLogger {
     ({String username, String password})? credentials,
     bool proxyOnly = false,
   }) async {
-    final origin = _originEndpoint(url);
-    if (origin != null) {
-      return _originClient(origin.ip).get<T>(
-        origin.url,
+    if (_hasMappedEndpoint(url)) {
+      return _mappedDio.get<T>(
+        url,
         cancelToken: cancelToken,
-        options: _originOptions(url, userAgent: userAgent, credentials: credentials),
+        options: _options(url, userAgent: userAgent, credentials: credentials),
       );
     }
 
@@ -125,13 +144,12 @@ class DioHttpClient with InfraLogger {
     ({String username, String password})? credentials,
     bool proxyOnly = false,
   }) async {
-    final origin = _originEndpoint(url);
-    if (origin != null) {
-      return _originClient(origin.ip).download(
-        origin.url,
+    if (_hasMappedEndpoint(url)) {
+      return _mappedDio.download(
+        url,
         path,
         cancelToken: cancelToken,
-        options: _originOptions(url, userAgent: userAgent, credentials: credentials),
+        options: _options(url, userAgent: userAgent, credentials: credentials),
       );
     }
 
@@ -174,46 +192,21 @@ class DioHttpClient with InfraLogger {
     );
   }
 
-  ({String ip, String url})? _originEndpoint(String url) {
+  bool _hasMappedEndpoint(String url) {
     final uri = Uri.tryParse(url.trim());
-    if (uri == null || !uri.hasScheme || uri.host.isEmpty) return null;
-
-    final originIp = _originIpForHost(uri.host);
-    if (originIp == null) return null;
-
-    return (ip: originIp, url: uri.replace(host: originIp).toString());
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) return false;
+    return KuaifeiOrigin.connectionAddressesForHost(uri.host).isNotEmpty;
   }
 
-  Dio _originClient(String originIp) {
-    return _originDio.putIfAbsent(originIp, () {
-      final dio = Dio(
-        BaseOptions(
-          connectTimeout: _timeout,
-          sendTimeout: _timeout,
-          receiveTimeout: _timeout,
-          headers: {"User-Agent": userAgent},
-        ),
-      );
-      dio.httpClientAdapter = IOHttpClientAdapter(
-        createHttpClient: () {
-          final client = HttpClient()
-            ..connectionTimeout = _timeout
-            ..findProxy = (uri) => 'DIRECT';
-          client.badCertificateCallback = (certificate, host, port) => host == originIp;
-          return client;
-        },
-      );
-      return dio;
-    });
-  }
-
-  Options _originOptions(String url, {String? userAgent, ({String username, String password})? credentials}) {
-    final options = _options(url, userAgent: userAgent, credentials: credentials);
-    final uri = Uri.parse(url.trim());
-    return options.copyWith(headers: {...?options.headers, HttpHeaders.hostHeader: uri.host});
-  }
-
-  static String? _originIpForHost(String host) {
-    return KuaifeiOrigin.ipForHost(host);
+  Future<Socket> _connectMapped(Uri uri) async {
+    Object? lastError;
+    for (final address in KuaifeiOrigin.connectionAddressesForHost(uri.host)) {
+      try {
+        return await Socket.connect(address, uri.port, timeout: _timeout);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw SocketException('Unable to connect mapped endpoint for ${uri.host}: $lastError');
   }
 }
