@@ -144,19 +144,19 @@ class XboardApiClient with InfraLogger {
 
     final body = _responseBody(response);
     if (body == null || body['status'] != 'success') {
-      throw XboardApiException(body?['message']?.toString() ?? '????????????');
+      throw XboardApiException(body?['message']?.toString() ?? '登录失败，请检查账号密码');
     }
 
     final data = body['data'] as Map<String, dynamic>?;
     if (data == null) {
-      throw XboardApiException('????????');
+      throw XboardApiException('登录返回数据异常');
     }
 
     final subscriptionToken = data['token']?.toString();
     final authData = data['auth_data']?.toString();
 
     if (subscriptionToken == null || authData == null) {
-      throw XboardApiException('?????????');
+      throw XboardApiException('登录返回数据不完整');
     }
 
     final sanctumToken = authData.startsWith('Bearer ') ? authData.substring(7) : authData;
@@ -173,12 +173,12 @@ class XboardApiClient with InfraLogger {
 
     final body = _responseBody(response);
     if (body == null || body['status'] != 'success') {
-      throw XboardApiException(body?['message']?.toString() ?? '????????');
+      throw XboardApiException(body?['message']?.toString() ?? '获取订阅信息失败');
     }
 
     final data = body['data'] as Map<String, dynamic>?;
     if (data == null) {
-      throw XboardApiException('??????');
+      throw XboardApiException('订阅数据异常');
     }
 
     final subscriptions = XboardSubscriptionProfile.fromList(data['subscriptions']);
