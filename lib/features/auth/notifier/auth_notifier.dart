@@ -8,6 +8,7 @@ import 'package:hiddify/core/db/db.dart';
 import 'package:hiddify/core/db/provider/db_providers.dart';
 import 'package:hiddify/core/directories/directories_provider.dart';
 import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/core/preferences/preferences_provider.dart';
 import 'package:hiddify/features/auth/data/origin_dns_bootstrap.dart';
 import 'package:hiddify/features/auth/data/xboard_api_client.dart';
@@ -27,8 +28,8 @@ final authNotifierProvider = AsyncNotifierProvider<AuthNotifier, AuthStatus>(() 
 
 class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   static const _loginTimeout = Duration(seconds: 30);
-  static const _loginTimeoutMessage = '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top';
-  static const _defaultPurchaseUrl = 'https://*.kuaifei.top(*换为任意字母或数字，APP登录不上也换为这类地址即可)';
+  static const _loginTimeoutMessage = '?????????????????5??????????????https://kk44v.kuaifei.top';
+  static const _defaultPurchaseUrl = 'https://*.kuaifei.top(*??????????APP?????????????)';
   static const _legacyPurchaseUrl = 'https://kuaifei.top';
   static const _defaultContactEmail = 'wahiya562@gmail.com';
   static const _legacyContactEmail = 'mahiya562@gmail.com';
@@ -38,7 +39,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   Future<AuthStatus> build() async {
     KuaifeiOrigin.restore(_prefs);
     ref.onDispose(() => _originRefreshTimer?.cancel());
-    // Don't auto-login on startup — show the login page, let user click login
+    // Don't auto-login on startup ? show the login page, let user click login
     return AuthStatus.idle;
   }
 
@@ -62,12 +63,12 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
 
   String get purchaseUrl => _normalizePurchaseUrl(_prefs.getString('auth_purchase_url'));
   String get contactEmail => _normalizeContactEmail(_prefs.getString('auth_contact_email'));
-  String get contactText => _prefs.getString('auth_contact_text') ?? '24小时内回复';
+  String get contactText => _prefs.getString('auth_contact_text') ?? '24?????';
 
   String _normalizePurchaseUrl(String? value) {
     final normalized = value?.trim();
     if (normalized == null || normalized.isEmpty || normalized == _legacyPurchaseUrl) {
-      return _defaultPurchaseUrl;
+      return Constants.purchaseUrl;
     }
     return normalized;
   }
@@ -94,10 +95,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       final normalizedUrl = panelUrl.replaceAll(RegExp(r'/+$'), '');
       await _rememberLastLoginInput(panelUrl: normalizedUrl, email: email, password: password);
 
-      final panelHost = Uri.tryParse(normalizedUrl)?.host ?? '';
-      if (KuaifeiOrigin.addressesForHost(panelHost).isEmpty) {
-        await OriginDnsBootstrap.refresh(_prefs);
-      }
+      // Refresh independently of the panel DNS. This remains usable when the
+      // panel hostname is polluted or its origin address has changed.
+      await OriginDnsBootstrap.refresh(_prefs);
 
       final client = XboardApiClient(baseUrl: normalizedUrl);
 

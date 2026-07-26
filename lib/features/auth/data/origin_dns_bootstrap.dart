@@ -3,17 +3,18 @@ import 'dart:io';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/model/constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class OriginDnsBootstrap {
   const OriginDnsBootstrap._();
 
-  static const url = 'https://raw.githubusercontent.com/andyhz0823/Xboard/master/bootstrap/origin-dns.json';
+  static const url = Constants.originDnsUrl;
   static const _publicKeyBase64 = 'g0+dbfOVBvm1ufO7itA99nvG/l+b1o4N3nQc0fWJ4WU=';
 
   static Future<bool> refresh(SharedPreferences preferences, {Duration timeout = const Duration(seconds: 6)}) async {
     final uri = Uri.parse(url);
-    final client = HttpClient()
+    final client = HttpClient(context: KuaifeiOrigin.securityContext)
       ..connectionTimeout = timeout
       ..findProxy = (_) => 'DIRECT';
     client.connectionFactory = (requestUri, proxyHost, proxyPort) async {
@@ -53,7 +54,7 @@ class OriginDnsBootstrap {
   }
 
   static Future<Socket> _connect(Uri uri, Duration timeout) async {
-    final addresses = KuaifeiOrigin.githubBootstrapRecords[uri.host] ?? const [];
+    final addresses = KuaifeiOrigin.connectionAddressesForHost(uri.host);
     Object? lastError;
     for (final address in addresses) {
       try {
@@ -63,7 +64,7 @@ class OriginDnsBootstrap {
       }
     }
     if (lastError != null) {
-      throw SocketException('GitHub bootstrap connection failed: $lastError');
+      throw SocketException('Distribution bootstrap connection failed: $lastError');
     }
     return Socket.connect(uri.host, uri.port, timeout: timeout);
   }

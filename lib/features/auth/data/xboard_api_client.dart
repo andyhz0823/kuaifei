@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/features/auth/data/login_doh_resolver.dart';
 import 'package:hiddify/utils/custom_loggers.dart';
 
@@ -10,6 +11,7 @@ class XboardApiClient with InfraLogger {
   static const requestTimeout = Duration(seconds: 10);
 
   final Dio _dio;
+  final Dio _relayDio;
   final Uri _baseUri;
   final LoginDohResolver _resolver;
 
@@ -24,10 +26,28 @@ class XboardApiClient with InfraLogger {
           receiveTimeout: requestTimeout,
           headers: {'User-Agent': 'kuaifei', 'Accept': 'application/json'},
         ),
+      ),
+      _relayDio = Dio(
+        BaseOptions(
+          baseUrl: Constants.distributionBaseUrl,
+          connectTimeout: requestTimeout,
+          sendTimeout: requestTimeout,
+          receiveTimeout: requestTimeout,
+          headers: {
+            'User-Agent': 'kuaifei',
+            'Accept': 'application/json',
+            'X-Kuaifei-Panel-Host': Uri.parse(baseUrl).host.toLowerCase(),
+          },
+        ),
       ) {
-    _dio.httpClientAdapter = IOHttpClientAdapter(
+    _configureAdapter(_dio);
+    _configureAdapter(_relayDio);
+  }
+
+  void _configureAdapter(Dio dio) {
+    dio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
-        final client = HttpClient()
+        final client = HttpClient(context: KuaifeiOrigin.securityContext)
           ..connectionTimeout = requestTimeout
           ..findProxy = (uri) => 'DIRECT';
         client.connectionFactory = (uri, proxyHost, proxyPort) async {
@@ -38,7 +58,19 @@ class XboardApiClient with InfraLogger {
     );
   }
 
+  bool get _canUseRelay {
+    final host = _baseUri.host.toLowerCase();
+    return host == 'kuaifei.top' || host.endsWith('.kuaifei.top');
+  }
+
   Future<void> prewarm() async {
+    if (_canUseRelay) {
+      final relayHost = Uri.parse(Constants.distributionBaseUrl).host;
+      final addresses = KuaifeiOrigin.connectionAddressesForHost(relayHost);
+      loggy.debug('Auth: using DNS-independent login relay at $relayHost: ${addresses.join(', ')}');
+      return;
+    }
+
     final cached = KuaifeiOrigin.addressesForHost(_baseUri.host);
     if (cached.isNotEmpty) {
       loggy.debug('Auth: loaded cached origin routing for ${_baseUri.host}: ${cached.join(', ')}');
@@ -54,7 +86,7 @@ class XboardApiClient with InfraLogger {
 
   Future<Socket> _connectForUri(Uri uri) async {
     final dohFuture = _resolver.resolve(uri.host, includeHttps: true);
-    final cached = KuaifeiOrigin.addressesForHost(uri.host).map(InternetAddress.new).toList(growable: false);
+    final cached = KuaifeiOrigin.connectionAddressesForHost(uri.host).map(InternetAddress.new).toList(growable: false);
     Object? cachedError;
     if (cached.isNotEmpty) {
       try {
@@ -90,10 +122,12 @@ class XboardApiClient with InfraLogger {
 
   void setToken(String token) {
     _dio.options.headers['Authorization'] = 'Bearer $token';
+    _relayDio.options.headers['Authorization'] = 'Bearer $token';
   }
 
   void clearToken() {
     _dio.options.headers.remove('Authorization');
+    _relayDio.options.headers.remove('Authorization');
   }
 
   Map<String, dynamic>? _responseBody(Response<dynamic> response) {
@@ -110,19 +144,19 @@ class XboardApiClient with InfraLogger {
 
     final body = _responseBody(response);
     if (body == null || body['status'] != 'success') {
-      throw XboardApiException(body?['message']?.toString() ?? '登录失败，请检查账号密码');
+      throw XboardApiException(body?['message']?.toString() ?? '????????????');
     }
 
     final data = body['data'] as Map<String, dynamic>?;
     if (data == null) {
-      throw XboardApiException('登录返回数据异常');
+      throw XboardApiException('????????');
     }
 
     final subscriptionToken = data['token']?.toString();
     final authData = data['auth_data']?.toString();
 
     if (subscriptionToken == null || authData == null) {
-      throw XboardApiException('登录返回数据不完整');
+      throw XboardApiException('?????????');
     }
 
     final sanctumToken = authData.startsWith('Bearer ') ? authData.substring(7) : authData;
@@ -139,12 +173,12 @@ class XboardApiClient with InfraLogger {
 
     final body = _responseBody(response);
     if (body == null || body['status'] != 'success') {
-      throw XboardApiException(body?['message']?.toString() ?? '获取订阅信息失败');
+      throw XboardApiException(body?['message']?.toString() ?? '????????');
     }
 
     final data = body['data'] as Map<String, dynamic>?;
     if (data == null) {
-      throw XboardApiException('订阅数据异常');
+      throw XboardApiException('??????');
     }
 
     final subscriptions = XboardSubscriptionProfile.fromList(data['subscriptions']);
@@ -183,8 +217,15 @@ class XboardApiClient with InfraLogger {
     return 'https://$normalized';
   }
 
-  Future<Response<dynamic>> _requestWithOriginFallback(Future<Response<dynamic>> Function(Dio dio) request) {
-    return request(_dio);
+  Future<Response<dynamic>> _requestWithOriginFallback(Future<Response<dynamic>> Function(Dio dio) request) async {
+    if (!_canUseRelay) return request(_dio);
+
+    try {
+      return await request(_relayDio);
+    } catch (relayError, stackTrace) {
+      loggy.warning('Auth: login relay failed; trying the panel directly', relayError, stackTrace);
+      return request(_dio);
+    }
   }
 }
 

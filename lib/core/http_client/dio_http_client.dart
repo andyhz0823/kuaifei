@@ -35,7 +35,7 @@ class DioHttpClient with InfraLogger {
 
       _dio[mode]!.httpClientAdapter = IOHttpClientAdapter(
         createHttpClient: () {
-          final client = HttpClient();
+          final client = HttpClient(context: KuaifeiOrigin.securityContext);
           client.findProxy = (url) {
             if (mode == "proxy") {
               return "PROXY localhost:$port";
@@ -60,7 +60,7 @@ class DioHttpClient with InfraLogger {
     );
     _mappedDio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
-        final client = HttpClient()
+        final client = HttpClient(context: KuaifeiOrigin.securityContext)
           ..connectionTimeout = timeout
           ..findProxy = (_) => 'DIRECT';
         client.connectionFactory = (uri, proxyHost, proxyPort) async {

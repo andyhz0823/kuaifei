@@ -7,7 +7,12 @@ abstract class Constants {
   static const licenseUrl = "https://github.com/andyhz0823/Xboard";
   static const githubReleasesApiUrl = "https://api.github.com/repos/andyhz0823/Xboard/releases";
   static const githubLatestReleaseUrl = "https://github.com/andyhz0823/Xboard/releases/latest";
-  static const appCastUrl = "https://raw.githubusercontent.com/andyhz0823/Xboard/main/appcast.xml";
+  // Runtime distribution is served by xz.kuaity.top. GitHub remains the source and release backup.
+  static const distributionBaseUrl = "https://xz.kuaity.top";
+  static const purchaseUrl = "$distributionBaseUrl/";
+  static const originDnsUrl = "$distributionBaseUrl/origin-dns.json";
+  static const updateManifestUrl = "$distributionBaseUrl/Downloads/latest.json";
+  static const appCastUrl = "$distributionBaseUrl/Downloads/appcast.xml";
   static const telegramChannelUrl = "https://t.me/hiddify";
   static const privacyPolicyUrl = "https://hiddify.com/privacy-policy/";
   static const termsAndConditionsUrl = "https://hiddify.com/terms/";
