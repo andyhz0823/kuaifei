@@ -202,11 +202,17 @@ class DioHttpClient with InfraLogger {
     Object? lastError;
     for (final address in KuaifeiOrigin.connectionAddressesForHost(uri.host)) {
       try {
-        return await Socket.connect(address, uri.port, timeout: _timeout);
+        final socket = await Socket.connect(address, uri.port, timeout: _timeout);
+        return _secureIfNeeded(uri, socket);
       } catch (error) {
         lastError = error;
       }
     }
     throw SocketException('Unable to connect mapped endpoint for ${uri.host}: $lastError');
+  }
+
+  Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {
+    if (!uri.isScheme('https')) return Future.value(socket);
+    return SecureSocket.secure(socket, host: uri.host, context: KuaifeiOrigin.securityContext);
   }
 }

@@ -188,12 +188,19 @@ class LoginDohResolver {
     client.connectionFactory = (requestUri, proxyHost, proxyPort) async {
       final host = requestUri.host.toLowerCase();
       if (host != uri.host.toLowerCase()) {
-        return ConnectionTask.fromSocket(Socket.connect(host, requestUri.port, timeout: timeout), () {});
+        final socket = await Socket.connect(host, requestUri.port, timeout: timeout);
+        return ConnectionTask.fromSocket(_secureIfNeeded(requestUri, socket), () {});
       }
 
-      return ConnectionTask.fromSocket(_connectFirstAvailable(bootstrap, requestUri.port), () {});
+      final socket = await _connectFirstAvailable(bootstrap, requestUri.port);
+      return ConnectionTask.fromSocket(_secureIfNeeded(requestUri, socket), () {});
     };
     return client;
+  }
+
+  Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {
+    if (!uri.isScheme('https')) return Future.value(socket);
+    return SecureSocket.secure(socket, host: uri.host);
   }
 
   Future<Socket> _connectFirstAvailable(List<InternetAddress> addresses, int port) async {

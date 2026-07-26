@@ -90,7 +90,8 @@ class XboardApiClient with InfraLogger {
     Object? cachedError;
     if (cached.isNotEmpty) {
       try {
-        return await _connectFirstAvailable(cached, uri.port, timeout: const Duration(seconds: 3));
+        final socket = await _connectFirstAvailable(cached, uri.port, timeout: const Duration(seconds: 3));
+        return _secureIfNeeded(uri, socket);
       } catch (error) {
         cachedError = error;
       }
@@ -98,7 +99,8 @@ class XboardApiClient with InfraLogger {
 
     try {
       final resolution = await dohFuture;
-      return await _connectFirstAvailable(resolution.addresses, uri.port);
+      final socket = await _connectFirstAvailable(resolution.addresses, uri.port);
+      return _secureIfNeeded(uri, socket);
     } catch (error) {
       throw SocketException('Cached and DoH endpoints failed for ${uri.host}: ${cachedError ?? error}');
     }
@@ -118,6 +120,11 @@ class XboardApiClient with InfraLogger {
       }
     }
     throw SocketException('Unable to connect to DoH resolved address: $lastError');
+  }
+
+  Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {
+    if (!uri.isScheme('https')) return Future.value(socket);
+    return SecureSocket.secure(socket, host: uri.host, context: KuaifeiOrigin.securityContext);
   }
 
   void setToken(String token) {

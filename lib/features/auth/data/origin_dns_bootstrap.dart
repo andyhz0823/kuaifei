@@ -58,7 +58,8 @@ class OriginDnsBootstrap {
     Object? lastError;
     for (final address in addresses) {
       try {
-        return await Socket.connect(address, uri.port, timeout: timeout);
+        final socket = await Socket.connect(address, uri.port, timeout: timeout);
+        return _secureIfNeeded(uri, socket);
       } catch (error) {
         lastError = error;
       }
@@ -66,6 +67,12 @@ class OriginDnsBootstrap {
     if (lastError != null) {
       throw SocketException('Distribution bootstrap connection failed: $lastError');
     }
-    return Socket.connect(uri.host, uri.port, timeout: timeout);
+    final socket = await Socket.connect(uri.host, uri.port, timeout: timeout);
+    return _secureIfNeeded(uri, socket);
+  }
+
+  static Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {
+    if (!uri.isScheme('https')) return Future.value(socket);
+    return SecureSocket.secure(socket, host: uri.host, context: KuaifeiOrigin.securityContext);
   }
 }
