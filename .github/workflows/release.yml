@@ -126,6 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           flutter pub get
+          make gen
           make android-libs CHANNEL=prod
       - name: Build split Android APKs
         env:
@@ -173,6 +174,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           flutter pub get
+          make gen
           make windows-libs CHANNEL=prod
       - name: Build Windows release tree
         shell: pwsh
