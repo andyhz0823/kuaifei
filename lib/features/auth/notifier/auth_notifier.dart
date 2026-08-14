@@ -35,6 +35,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   static const _defaultContactEmail = 'wahiya562@gmail.com';
   static const _legacyContactEmail = 'mahiya562@gmail.com';
   static const _profileRefreshInterval = Duration(minutes: 30);
+  static const _profileSyncRetryDelay = Duration(seconds: 2);
   Timer? _originRefreshTimer;
   Timer? _profileRefreshTimer;
   bool _originRefreshInFlight = false;
@@ -199,16 +200,59 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   Future<void> _syncProfilesAfterLogin() async {
     try {
       await _removeLegacyDefaultSubscriptionProfile();
-      if (subscriptionProfiles.isEmpty) {
-        await clearLocalProfileData();
-        ref.invalidate(activeProfileProvider);
-        loggy.info('Auth: no usable subscriptions; local profiles cleared');
+
+      // Profile imports intentionally run after authentication so a slow or
+      // unavailable subscription endpoint does not make login slow. Do not
+      // assume that starting the background task means the import completed:
+      // verify the database after the first pass and retry once when the
+      // expected subscription profiles are still missing.
+      var expectedProfiles = subscriptionProfiles;
+      if (expectedProfiles.isEmpty) {
+        loggy.warning('Auth: login returned no subscription profiles; retrying getSubscribe');
+        await _refreshSubscriptionProfiles();
+        expectedProfiles = subscriptionProfiles;
+      }
+
+      if (expectedProfiles.isEmpty) {
+        // Keep any existing local profiles on a transient metadata failure.
+        // They are safer than deleting the user's working configuration.
+        loggy.warning('Auth: no usable subscriptions after login retry; keeping existing local profiles');
         return;
       }
-      await _syncStoredSubscriptionsToProfiles(removeObsoleteProfiles: true, throwOnTotalFailure: true);
+
+      await _syncStoredSubscriptionsToProfiles(removeObsoleteProfiles: true);
+      if (await _hasAllExpectedSubscriptionProfiles(expectedProfiles)) return;
+
+      loggy.warning('Auth: subscription sync incomplete after login; retrying once');
+      await Future<void>.delayed(_profileSyncRetryDelay);
+      await _refreshSubscriptionProfiles();
+
+      final refreshedProfiles = subscriptionProfiles;
+      if (refreshedProfiles.isNotEmpty && !await _hasAllExpectedSubscriptionProfiles(refreshedProfiles)) {
+        // The endpoint may have returned the same metadata while the first
+        // import was still being committed. A final idempotent import makes
+        // the recovery deterministic without adding latency to login itself.
+        await _syncStoredSubscriptionsToProfiles(removeObsoleteProfiles: true);
+      }
+
+      if (!await _hasAllExpectedSubscriptionProfiles(subscriptionProfiles)) {
+        loggy.warning('Auth: subscription profiles remain incomplete after login retry');
+      }
     } catch (error, stackTrace) {
       loggy.warning('Auth: background subscription import failed; login remains authenticated', error, stackTrace);
     }
+  }
+
+  Future<bool> _hasAllExpectedSubscriptionProfiles(List<XboardSubscriptionProfile> expectedProfiles) async {
+    final desiredUrls = expectedProfiles.map((profile) => profile.subscribeUrl).where((url) => url.isNotEmpty).toSet();
+    if (desiredUrls.isEmpty) return false;
+
+    final db = ref.read(dbProvider);
+    final entries = await db.select(db.profileEntries).get();
+    final syncedUrls = entries.map((entry) => entry.url).whereType<String>().where((url) => url.isNotEmpty).toSet();
+    final syncedCount = desiredUrls.intersection(syncedUrls).length;
+    loggy.info('Auth: subscription profile check $syncedCount/${desiredUrls.length} present');
+    return syncedCount == desiredUrls.length;
   }
 
   void _scheduleRefreshes() {
