@@ -74,3 +74,7 @@ app.*.map.json
 # Windows Self-Signed for msix
 windows/sign.pfx
 windows/sign.cernul
+
+# FlutterGen outputs are kept in source control because the maintained runner is not compatible with the pinned build_runner toolchain.
+!lib/gen/assets.gen.dart
+!lib/gen/fonts.gen.dart

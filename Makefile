@@ -70,6 +70,8 @@ get:
 	flutter pub get
 
 gen:
+	# Generate translations outside build_runner; current slang_build_runner uses an obsolete post-process build.yaml schema.
+	dart run slang
 	dart run build_runner build --delete-conflicting-outputs
 
 translate:

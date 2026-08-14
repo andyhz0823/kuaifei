@@ -146,8 +146,6 @@ dev_dependencies:
   riverpod_generator: ^2.4.3
   drift_dev: ^2.21.0
   ffigen: ^19.1.0
-  slang_build_runner: ^4.4.0
-  flutter_gen_runner: ^5.4.0
   dart_mappable_builder: ^4.2.1
   # protoc_builder: ^0.4.1
   # google_protobuf: ^3.20.1;
