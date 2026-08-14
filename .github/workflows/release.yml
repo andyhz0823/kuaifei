@@ -194,7 +194,11 @@ jobs:
           Copy-Item 'build\windows\x64\runner\Release\*' $portable -Recurse -Force
           Compress-Archive -Path "$portable\*" -DestinationPath "$out\kuaifei-$env:VERSION.zip" -Force
           & iscc /Qp kuaifei_setup.iss
-          Copy-Item "dist\$env:VERSION+$env:BUILD_NUMBER\kuaifei-$env:VERSION.exe" "$out\kuaifei-$env:VERSION.exe" -Force
+          $installer = Get-ChildItem -Path (Join-Path $PWD 'dist') -Filter "kuaifei-$env:VERSION.exe" -Recurse -File | Select-Object -First 1
+          if ($null -eq $installer) {
+            throw "Inno Setup did not produce kuaifei-$env:VERSION.exe under dist"
+          }
+          Copy-Item $installer.FullName "$out\kuaifei-$env:VERSION.exe" -Force
           Set-Content -Path "$out\WINDOWS-PLATFORM-SIGNING-WARNING.txt" -Value @'
           WARNING: Windows artifacts are not Authenticode-signed in this open-source workflow.
           Sigstore keyless signatures verify the release artifact and GitHub Actions identity, but do not make Windows Smart App Control trust the binary.
