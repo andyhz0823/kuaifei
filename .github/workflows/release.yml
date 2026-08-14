@@ -12,11 +12,13 @@ on:
         default: v4.1.11
         type: string
       publish:
-        description: Publish GitHub Release after trusted Android and Windows signing succeeds
+        description: Publish a GitHub Release with Sigstore keyless signatures
         required: true
         default: false
         type: boolean
 
+# Sigstore keyless signing needs OIDC. The release job only publishes artifacts
+# produced by this workflow and signs them with an ephemeral Fulcio certificate.
 permissions:
   contents: write
   id-token: write
@@ -34,7 +36,6 @@ jobs:
       build_number: ${{ steps.release.outputs.build_number }}
       tag: ${{ steps.release.outputs.tag }}
       android_signing_ready: ${{ steps.signing.outputs.android_ready }}
-      windows_signing_ready: ${{ steps.signing.outputs.windows_ready }}
       publish: ${{ steps.signing.outputs.publish }}
     steps:
       - uses: actions/checkout@v6
@@ -64,36 +65,29 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
-          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
-          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
           IS_TAG_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
           MANUAL_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         run: |
           set -euo pipefail
           android_ready=false
-          windows_ready=false
           publish=false
 
+          # Android's package signature is separate from Sigstore. Keep the
+          # stable keystore optional for CI evaluation, but recommend it for
+          # install-over-update compatibility with previous Kuaifei releases.
           if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEYSTORE_PASSWORD" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_KEY_PASSWORD" ]]; then
             android_ready=true
           fi
-          if [[ -n "$AZURE_CLIENT_ID" && -n "$AZURE_TENANT_ID" && -n "$AZURE_SUBSCRIPTION_ID" && -n "$AZURE_TRUSTED_SIGNING_ACCOUNT" && -n "$AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE" && -n "$AZURE_TRUSTED_SIGNING_ENDPOINT" ]]; then
-            windows_ready=true
-          fi
-          if [[ ( "$IS_TAG_RELEASE" == "true" || "$MANUAL_PUBLISH" == "true" ) && "$android_ready" == "true" && "$windows_ready" == "true" ]]; then
+          if [[ ( "$IS_TAG_RELEASE" == "true" || "$MANUAL_PUBLISH" == "true" ) && "$android_ready" == "true" ]]; then
             publish=true
           fi
 
           echo "android_ready=$android_ready" >> "$GITHUB_OUTPUT"
-          echo "windows_ready=$windows_ready" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
-          if [[ "$publish" != "true" ]]; then
-            echo "Public release is gated: Android keystore and Azure Trusted Signing secrets must all be configured."
+          if [[ "$android_ready" != "true" ]]; then
+            echo "Public release is gated: configure ANDROID_* secrets so APK updates retain the stable Android package signature."
           fi
+          echo "Sigstore keyless signing is enabled; no Azure Trusted Signing secrets are required."
 
   build-android:
     needs: preflight
@@ -141,13 +135,18 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
+          ANDROID_SIGNING_READY: ${{ needs.preflight.outputs.android_signing_ready }}
         run: |
           set -euo pipefail
           mkdir -p out
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "out/Kuaifei-v${VERSION}-android-arm64-v8a.apk"
           cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "out/Kuaifei-v${VERSION}-android-armeabi-v7a.apk"
-          if [[ "${{ needs.preflight.outputs.android_signing_ready }}" != "true" ]]; then
-            printf 'WARNING: Android artifacts are debug-signed because release signing secrets are not configured.\n' > out/UNSIGNED-ANDROID-ARTIFACTS.txt
+          if [[ "$ANDROID_SIGNING_READY" != "true" ]]; then
+            printf '%s\n' \
+              'WARNING: Android APKs use the Gradle debug key because ANDROID_* secrets are not configured.' \
+              'Sigstore keyless signatures verify the release artifact and CI identity, but do not replace Android package signing.' \
+              'Configure the stable Android keystore secrets before publishing an update over an existing installation.' \
+              > out/ANDROID-PLATFORM-SIGNING-WARNING.txt
           fi
       - uses: actions/upload-artifact@v6
         with:
@@ -180,25 +179,6 @@ jobs:
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: flutter build windows --release --target lib/main_prod.dart --dart-define=sentry_dsn="$env:SENTRY_DSN"
-      - name: Azure login for Trusted Signing
-        if: needs.preflight.outputs.windows_signing_ready == 'true'
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Sign Windows application binaries with Azure Trusted Signing
-        if: needs.preflight.outputs.windows_signing_ready == 'true'
-        uses: azure/artifact-signing-action@v2
-        with:
-          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
-          files-folder: ${{ github.workspace }}\build\windows\x64\runner\Release
-          files-folder-filter: exe,dll
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
       - name: Package Windows portable ZIP and installer
         shell: pwsh
         env:
@@ -213,33 +193,10 @@ jobs:
           Compress-Archive -Path "$portable\*" -DestinationPath "$out\kuaifei-$env:VERSION.zip" -Force
           & iscc /Qp kuaifei_setup.iss
           Copy-Item "dist\$env:VERSION+$env:BUILD_NUMBER\kuaifei-$env:VERSION.exe" "$out\kuaifei-$env:VERSION.exe" -Force
-      - name: Sign Windows installer with Azure Trusted Signing
-        if: needs.preflight.outputs.windows_signing_ready == 'true'
-        uses: azure/artifact-signing-action@v2
-        with:
-          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
-          files-folder: ${{ github.workspace }}\out
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-      - name: Verify trusted Windows signatures
-        if: needs.preflight.outputs.windows_signing_ready == 'true'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $files = Get-ChildItem -Path 'build\windows\x64\runner\Release', 'out' -Recurse -Include *.exe, *.dll
-          $invalid = $files | Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' }
-          if ($invalid) {
-            $invalid | Select-Object FullName | Format-Table -AutoSize
-            throw 'Azure Trusted Signing did not produce valid signatures for every Windows binary.'
-          }
-      - name: Mark unsigned Windows evaluation artifacts
-        if: needs.preflight.outputs.windows_signing_ready != 'true'
-        shell: pwsh
-        run: 'Set-Content -Path out\UNSIGNED-WINDOWS-ARTIFACTS.txt -Value "WARNING: Windows artifacts are unsigned because Azure Trusted Signing is not configured. They are CI evaluation artifacts only and are not published as a release."'
+          Set-Content -Path "$out\WINDOWS-PLATFORM-SIGNING-WARNING.txt" -Value @'
+          WARNING: Windows artifacts are not Authenticode-signed in this open-source workflow.
+          Sigstore keyless signatures verify the release artifact and GitHub Actions identity, but do not make Windows Smart App Control trust the binary.
+          '@
       - uses: actions/upload-artifact@v6
         with:
           name: kuaifei-windows
@@ -257,16 +214,50 @@ jobs:
           pattern: kuaifei-*
           merge-multiple: true
           path: out/
-      - name: Generate SHA-256 checksums
+      - name: Install Cosign for Sigstore keyless signing
+        uses: sigstore/cosign-installer@v3
+      - name: Generate verification metadata and SHA-256 checksums
         shell: bash
+        env:
+          EXPECTED_CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+          SIGSTORE_OIDC_ISSUER: https://token.actions.githubusercontent.com
         run: |
           set -euo pipefail
           cd out
-          sha256sum Kuaifei-v*.apk kuaifei-*.exe kuaifei-*.zip > SHA256SUMS.txt
+          cat > SIGSTORE-VERIFICATION.txt <<EOF
+          certificate_identity=$EXPECTED_CERTIFICATE_IDENTITY
+          certificate_oidc_issuer=$SIGSTORE_OIDC_ISSUER
+          source_repository=${{ github.repository }}
+          source_ref=${{ github.ref }}
+          source_sha=${{ github.sha }}
+          release_tag=${{ needs.preflight.outputs.tag }}
+          EOF
+          sha256sum Kuaifei-v*.apk kuaifei-*.exe kuaifei-*.zip SIGSTORE-VERIFICATION.txt > SHA256SUMS.txt
+      - name: Sign release artifacts with Sigstore keyless
+        shell: bash
+        env:
+          EXPECTED_CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+          SIGSTORE_OIDC_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          set -euo pipefail
+          cd out
+          for file in Kuaifei-v*.apk kuaifei-*.exe kuaifei-*.zip SHA256SUMS.txt SIGSTORE-VERIFICATION.txt; do
+            cosign sign-blob --yes --bundle "${file}.sigstore.json" "$file"
+          done
+          for file in Kuaifei-v*.apk kuaifei-*.exe kuaifei-*.zip SHA256SUMS.txt SIGSTORE-VERIFICATION.txt; do
+            cosign verify-blob \
+              --bundle "${file}.sigstore.json" \
+              --certificate-identity "$EXPECTED_CERTIFICATE_IDENTITY" \
+              --certificate-oidc-issuer "$SIGSTORE_OIDC_ISSUER" \
+              "$file"
+          done
       - name: Attest release build provenance
         uses: actions/attest-build-provenance@v3
         with:
-          subject-path: out/*
+          subject-path: |
+            out/Kuaifei-v*.apk
+            out/kuaifei-*.exe
+            out/kuaifei-*.zip
       - name: Publish signed GitHub Release
         uses: softprops/action-gh-release@v2
         with:
