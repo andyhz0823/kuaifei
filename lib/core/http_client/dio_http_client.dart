@@ -8,7 +8,6 @@ import 'package:dio_smart_retry/dio_smart_retry.dart';
 import 'package:hiddify/core/http_client/kuaifei_origin.dart';
 import 'package:hiddify/features/auth/data/login_doh_resolver.dart';
 import 'package:hiddify/utils/custom_loggers.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class DioHttpClient with InfraLogger {
   /// Mapped addresses are best effort; stale Cloudflare IPs must not block sync.
@@ -26,9 +25,8 @@ class DioHttpClient with InfraLogger {
     required Duration timeout,
     required this.userAgent,
     required bool debug,
-    SharedPreferences? preferences,
   }) {
-    _dohResolver = LoginDohResolver(preferences: preferences, timeout: const Duration(seconds: 2));
+    _dohResolver = LoginDohResolver(timeout: const Duration(seconds: 2));
     for (final mode in ['proxy', 'direct', 'both']) {
       _dio[mode] = Dio(
         BaseOptions(
