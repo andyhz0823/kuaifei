@@ -1,20 +1,277 @@
-name: Release
+name: Kuaifei Release
+
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+.*'
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, for example v4.1.11
+        required: true
+        default: v4.1.11
+        type: string
+      publish:
+        description: Publish GitHub Release after trusted Android and Windows signing succeeds
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: kuaifei-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  build-release:
-    uses: ./.github/workflows/build.yml
-    secrets: inherit
-    permissions: write-all
-    with:
-      upload-artifact: true
-      tag-name: "${{ github.ref_name }}"
-      channel: "${{ github.ref_type == 'tag' && endsWith(github.ref_name, 'dev') && 'dev' || github.ref_type != 'tag' && 'dev' || 'prod' }}"
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      build_number: ${{ steps.release.outputs.build_number }}
+      tag: ${{ steps.release.outputs.tag }}
+      android_signing_ready: ${{ steps.signing.outputs.android_ready }}
+      windows_signing_ready: ${{ steps.signing.outputs.windows_ready }}
+      publish: ${{ steps.signing.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: release
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version_line="$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')"
+          version="${version_line%%+*}"
+          build_number="${version_line#*+}"
+          expected_tag="v${version}"
+          if [[ "$REQUESTED_TAG" != "$expected_tag" ]]; then
+            echo "Tag $REQUESTED_TAG does not match pubspec version $expected_tag" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+          echo "tag=$expected_tag" >> "$GITHUB_OUTPUT"
+      - id: signing
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          IS_TAG_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          MANUAL_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        run: |
+          set -euo pipefail
+          android_ready=false
+          windows_ready=false
+          publish=false
+
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEYSTORE_PASSWORD" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_KEY_PASSWORD" ]]; then
+            android_ready=true
+          fi
+          if [[ -n "$AZURE_CLIENT_ID" && -n "$AZURE_TENANT_ID" && -n "$AZURE_SUBSCRIPTION_ID" && -n "$AZURE_TRUSTED_SIGNING_ACCOUNT" && -n "$AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE" && -n "$AZURE_TRUSTED_SIGNING_ENDPOINT" ]]; then
+            windows_ready=true
+          fi
+          if [[ ( "$IS_TAG_RELEASE" == "true" || "$MANUAL_PUBLISH" == "true" ) && "$android_ready" == "true" && "$windows_ready" == "true" ]]; then
+            publish=true
+          fi
+
+          echo "android_ready=$android_ready" >> "$GITHUB_OUTPUT"
+          echo "windows_ready=$windows_ready" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          if [[ "$publish" != "true" ]]; then
+            echo "Public release is gated: Android keystore and Azure Trusted Signing secrets must all be configured."
+          fi
+
+  build-android:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.4'
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Restore Android release signing key
+        if: needs.preflight.outputs.android_signing_ready == 'true'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/key.jks
+          cat > android/key.properties <<EOF
+          storeFile=$GITHUB_WORKSPACE/android/key.jks
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+      - name: Restore Flutter packages and bundled Android core
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter pub get
+          make android-libs CHANNEL=prod
+      - name: Build split Android APKs
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: flutter build apk --release --split-per-abi --target lib/main_prod.dart --dart-define=sentry_dsn="$SENTRY_DSN"
+      - name: Stage Android assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "out/Kuaifei-v${VERSION}-android-arm64-v8a.apk"
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "out/Kuaifei-v${VERSION}-android-armeabi-v7a.apk"
+          if [[ "${{ needs.preflight.outputs.android_signing_ready }}" != "true" ]]; then
+            printf 'WARNING: Android artifacts are debug-signed because release signing secrets are not configured.\n' > out/UNSIGNED-ANDROID-ARTIFACTS.txt
+          fi
+      - uses: actions/upload-artifact@v6
+        with:
+          name: kuaifei-android
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+  build-windows:
+    needs: preflight
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.4'
+          channel: stable
+          cache: true
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress --yes
+      - name: Restore Flutter packages and bundled Windows core
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          flutter pub get
+          make windows-libs CHANNEL=prod
+      - name: Build Windows release tree
+        shell: pwsh
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: flutter build windows --release --target lib/main_prod.dart --dart-define=sentry_dsn="$env:SENTRY_DSN"
+      - name: Azure login for Trusted Signing
+        if: needs.preflight.outputs.windows_signing_ready == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign Windows application binaries with Azure Trusted Signing
+        if: needs.preflight.outputs.windows_signing_ready == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          files-folder: ${{ github.workspace }}\build\windows\x64\runner\Release
+          files-folder-filter: exe,dll
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Package Windows portable ZIP and installer
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BUILD_NUMBER: ${{ needs.preflight.outputs.build_number }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $PWD 'out'
+          $portable = Join-Path $PWD 'portable\Kuaifei'
+          New-Item -ItemType Directory -Force -Path $out, $portable | Out-Null
+          Copy-Item 'build\windows\x64\runner\Release\*' $portable -Recurse -Force
+          Compress-Archive -Path "$portable\*" -DestinationPath "$out\kuaifei-$env:VERSION.zip" -Force
+          & iscc /Qp kuaifei_setup.iss
+          Copy-Item "dist\$env:VERSION+$env:BUILD_NUMBER\kuaifei-$env:VERSION.exe" "$out\kuaifei-$env:VERSION.exe" -Force
+      - name: Sign Windows installer with Azure Trusted Signing
+        if: needs.preflight.outputs.windows_signing_ready == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          files-folder: ${{ github.workspace }}\out
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Verify trusted Windows signatures
+        if: needs.preflight.outputs.windows_signing_ready == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = Get-ChildItem -Path 'build\windows\x64\runner\Release', 'out' -Recurse -Include *.exe, *.dll
+          $invalid = $files | Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' }
+          if ($invalid) {
+            $invalid | Select-Object FullName | Format-Table -AutoSize
+            throw 'Azure Trusted Signing did not produce valid signatures for every Windows binary.'
+          }
+      - name: Mark unsigned Windows evaluation artifacts
+        if: needs.preflight.outputs.windows_signing_ready != 'true'
+        shell: pwsh
+        run: 'Set-Content -Path out\UNSIGNED-WINDOWS-ARTIFACTS.txt -Value "WARNING: Windows artifacts are unsigned because Azure Trusted Signing is not configured. They are CI evaluation artifacts only and are not published as a release."'
+      - uses: actions/upload-artifact@v6
+        with:
+          name: kuaifei-windows
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: [preflight, build-android, build-windows]
+    if: needs.preflight.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: kuaifei-*
+          merge-multiple: true
+          path: out/
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd out
+          sha256sum Kuaifei-v*.apk kuaifei-*.exe kuaifei-*.zip > SHA256SUMS.txt
+      - name: Attest release build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: out/*
+      - name: Publish signed GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          name: Kuaifei ${{ needs.preflight.outputs.version }}
+          prerelease: false
+          generate_release_notes: true
+          files: out/*
