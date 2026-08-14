@@ -29,7 +29,10 @@ class AppUpdateRepositoryImpl with ExceptionHandler, InfraLogger implements AppU
       if (!release.allowCustomUpdateChecker) {
         throw Exception("custom update checkers are not supported");
       }
-      final response = await httpClient.get<Map<String, dynamic>>(Constants.updateManifestUrl);
+      final manifestUrl = defaultTargetPlatform == TargetPlatform.windows
+          ? Constants.windowsUpdateManifestUrl
+          : Constants.updateManifestUrl;
+      final response = await httpClient.get<Map<String, dynamic>>(manifestUrl);
       if (response.statusCode != 200 || response.data == null) {
         loggy.warning("failed to fetch latest version info");
         return left(const AppUpdateFailure.unexpected());

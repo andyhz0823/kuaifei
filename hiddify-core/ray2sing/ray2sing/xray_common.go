@@ -133,7 +133,7 @@ import (
 
 // // 	return map[string]any{
 // // 		"path": path,
-// // 		"host": strings.Split(decoded["host"], ","),
+// // 		"host": normalizeHostHeaderList(decoded["host"]),
 // // 		"headers": map[string]string{
 // // 			"User-Agent": USER_AGENT,
 // // 		},
@@ -257,9 +257,9 @@ func getTLSOptionsXray(decoded map[string]string) map[string]any {
 	if !(decoded["tls"] == "tls" || decoded["security"] == "tls") {
 		return nil
 	}
-	serverName := decoded["sni"]
+	serverName := normalizeConnectionHost(decoded["sni"])
 	if serverName == "" {
-		serverName = decoded["add"]
+		serverName = normalizeConnectionHost(decoded["add"])
 	}
 	alpn := []string{"h2", "http/1.1"}
 	if alpnlink, ok := decoded["alpn"]; ok && alpnlink != "" {
@@ -291,9 +291,9 @@ func getRealityOptionsXray(decoded map[string]string) map[string]any {
 	if !(decoded["security"] == "reality") {
 		return nil
 	}
-	serverName := decoded["sni"]
+	serverName := normalizeConnectionHost(decoded["sni"])
 	if serverName == "" {
-		serverName = decoded["add"]
+		serverName = normalizeConnectionHost(decoded["add"])
 	}
 	// alpn := []string{"h2", "http/1.1"}
 	// if alpnlink, ok := decoded["alpn"]; ok && alpnlink != "" {
@@ -332,7 +332,7 @@ func getsplithttp(decoded map[string]string) map[string]any {
 	}
 	res := map[string]any{
 		"path": path,
-		"host": decoded["host"],
+		"host": strings.Join(normalizeHostHeaderList(decoded["host"]), ","),
 
 		// "headers": map[string]string{
 		// 	"User-Agent": USER_AGENT,
@@ -370,7 +370,7 @@ func gethttpupgrade(decoded map[string]string) map[string]any {
 
 	return map[string]any{
 		"path": path,
-		"host": decoded["host"],
+		"host": strings.Join(normalizeHostHeaderList(decoded["host"]), ","),
 		// "headers": map[string]string{
 		// 	"User-Agent": USER_AGENT,
 		// },
@@ -384,7 +384,7 @@ func getwebsocket(decoded map[string]string) map[string]any {
 
 	return map[string]any{
 		"path": path,
-		"host": decoded["host"],
+		"host": strings.Join(normalizeHostHeaderList(decoded["host"]), ","),
 		// "headers": map[string]string{
 		// 	"User-Agent": USER_AGENT,
 		// },
@@ -399,7 +399,7 @@ func geth2(decoded map[string]string) map[string]any {
 
 	return map[string]any{
 		"path": path,
-		"host": strings.Split(decoded["host"], ","),
+		"host": normalizeHostHeaderList(decoded["host"]),
 		// "headers": map[string]string{
 		// 	"User-Agent": USER_AGENT,
 		// },
@@ -420,7 +420,7 @@ func getquic(decoded map[string]string) map[string]any {
 func getgrpc(decoded map[string]string) map[string]any {
 
 	return map[string]any{
-		"authority":   decoded["authority"],
+		"authority":   normalizeConnectionHost(decoded["authority"]),
 		"serviceName": decoded["servicename"],
 		"mode":        decoded["mode"],
 		// "user_agent":  USER_AGENT,

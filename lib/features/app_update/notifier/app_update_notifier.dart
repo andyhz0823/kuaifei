@@ -47,7 +47,7 @@ class AppUpdateNotifier extends _$AppUpdateNotifier with AppLogger {
     defaultValue: null,
   );
 
-  Future<AppUpdateState> check() async {
+  Future<AppUpdateState> check({bool respectIgnoredRelease = true}) async {
     loggy.debug("checking for update");
     state = const AppUpdateState.checking();
     final appInfo = ref.watch(appInfoProvider).requireValue;
@@ -71,7 +71,7 @@ class AppUpdateNotifier extends _$AppUpdateNotifier with AppLogger {
               final currentBuild = int.tryParse(appInfo.buildNumber) ?? 0;
               final buildIsNewer = remote.version == appInfo.version && latestBuild > currentBuild;
               if (latestVersion > currentVersion || buildIsNewer) {
-                if (remote.version == _ignoreReleasePref.read()) {
+                if (respectIgnoredRelease && remote.version == _ignoreReleasePref.read()) {
                   loggy.debug("ignored release [${remote.version}]");
                   return state = AppUpdateStateIgnored(remote);
                 }

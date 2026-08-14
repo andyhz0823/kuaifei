@@ -125,27 +125,37 @@ class ProfileRepositoryImpl with ExceptionHandler, InfraLogger implements Profil
 
   @override
   TaskEither<ProfileFailure, Unit> upsertRemote(String url, {UserOverride? userOverride, CancelToken? cancelToken}) =>
-      TaskEither.tryCatch(
-        () async => await _profileDataSource.getByUrl(url).then((profEntry) => profEntry?.toEntity()),
-        ProfileFailure.unexpected,
-      ).flatMap((profEntity) {
+      TaskEither.tryCatch(() async {
+        final byUrl = await _profileDataSource.getByUrl(url);
+        if (byUrl != null) return byUrl.toEntity();
+
+        // Xboard subscription URLs can change when the panel rotates domains,
+        // but the purchased package name stays stable. Treat that name as the
+        // identity for Kuaifei multi-package imports so updates replace the
+        // existing package instead of creating numbered duplicate names.
+        final profileName = userOverride?.name?.trim();
+        if (profileName != null && profileName.isNotEmpty) {
+          return _profileDataSource.getRemoteByName(profileName).then((profEntry) => profEntry?.toEntity());
+        }
+        return null;
+      }, ProfileFailure.unexpected).flatMap((profEntity) {
         // if profile is null, generate id
         final id = profEntity?.id ?? const Uuid().v4();
         final file = _profilePathResolver.file(id);
         final tempFile = _profilePathResolver.tempFile(id);
         try {
           if (profEntity != null && profEntity is RemoteProfileEntity) {
-            // Update
-            if (userOverride != null) {
-              profEntity = profEntity.copyWith(userOverride: userOverride);
-            }
+            // Update. Use the latest URL supplied by the server even when the
+            // existing profile was found by stable package name.
+            final remoteProfile = profEntity.copyWith(url: url, userOverride: userOverride ?? profEntity.userOverride);
             return _profileParser
-                .updateRemote(rp: profEntity, tempFilePath: tempFile.path, cancelToken: cancelToken)
+                .updateRemote(rp: remoteProfile, tempFilePath: tempFile.path, cancelToken: cancelToken)
                 .flatMap(
                   (profEntity) =>
                       validateConfig(file.path, tempFile.path, profEntity.profileOverride.value, false).flatMap(
                         (unit) => TaskEither.tryCatch(() async {
                           await _profileDataSource.edit(id, profEntity);
+                          await _deleteRemoteDuplicateProfiles(profEntity.name.value, keepId: id);
                           return unit;
                         }, ProfileFailure.unexpected),
                       ),
@@ -165,6 +175,7 @@ class ProfileRepositoryImpl with ExceptionHandler, InfraLogger implements Profil
                       validateConfig(file.path, tempFile.path, profEntity.profileOverride.value, false).flatMap(
                         (unit) => TaskEither.tryCatch(() async {
                           await _profileDataSource.insert(profEntity);
+                          await _deleteRemoteDuplicateProfiles(profEntity.name.value, keepId: id);
                           return unit;
                         }, ProfileFailure.unexpected),
                       ),
@@ -174,6 +185,12 @@ class ProfileRepositoryImpl with ExceptionHandler, InfraLogger implements Profil
           if (tempFile.existsSync()) tempFile.deleteSync();
         }
       });
+
+  Future<void> _deleteRemoteDuplicateProfiles(String name, {required String keepId}) async {
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty) return;
+    await _profileDataSource.deleteRemoteDuplicatesByName(normalizedName, keepId: keepId);
+  }
 
   @override
   TaskEither<ProfileFailure, Unit> addLocal(String content, {UserOverride? userOverride}) =>

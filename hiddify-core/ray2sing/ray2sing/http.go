@@ -26,7 +26,7 @@ func HttpSingbox(url string) (*T.Outbound, error) {
 		}
 	}
 	if sni, err := getOneOf(u.Params, "sni"); err == nil {
-		opts.OutboundTLSOptionsContainer.TLS.ServerName = sni
+		opts.OutboundTLSOptionsContainer.TLS.ServerName = normalizeConnectionHost(sni)
 	}
 	if insecure, err := getOneOf(u.Params, "insecure"); err == nil {
 		opts.OutboundTLSOptionsContainer.TLS.Insecure = insecure != "0"
@@ -59,7 +59,7 @@ func HttpsSingbox(url string) (*T.Outbound, error) {
 		Enabled: true,
 	}
 	if sni, err := getOneOf(u.Params, "sni"); err == nil {
-		opts.OutboundTLSOptionsContainer.TLS.ServerName = sni
+		opts.OutboundTLSOptionsContainer.TLS.ServerName = normalizeConnectionHost(sni)
 	}
 	if insecure, err := getOneOf(u.Params, "insecure"); err == nil {
 		opts.OutboundTLSOptionsContainer.TLS.Insecure = insecure != "0"

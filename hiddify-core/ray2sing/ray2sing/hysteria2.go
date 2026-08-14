@@ -29,9 +29,9 @@ func Hysteria2Singbox(hysteria2Url string) (*T.Outbound, error) {
 		}
 	}
 
-	SNI := decoded["sni"]
+	SNI := normalizeConnectionHost(decoded["sni"])
 	if SNI == "" {
-		SNI = decoded["hostname"]
+		SNI = normalizeConnectionHost(decoded["hostname"])
 	}
 	// turnRelay, err := u.GetRelayOptions()
 	// if err != nil {

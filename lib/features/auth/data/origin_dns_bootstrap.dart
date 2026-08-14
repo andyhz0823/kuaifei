@@ -9,11 +9,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 class OriginDnsBootstrap {
   const OriginDnsBootstrap._();
 
-  static const url = Constants.originDnsUrl;
-  static const _publicKeyBase64 = 'g0+dbfOVBvm1ufO7itA99nvG/l+b1o4N3nQc0fWJ4WU=';
+  static const urls = [Constants.bootstrapUrl, Constants.originDnsUrl];
+  static const _publicKeyBase64 = '2OgYgpyYnI53e7hSNxh6OX4pjbLx5r0WDE/tnphd9ug=';
 
   static Future<bool> refresh(SharedPreferences preferences, {Duration timeout = const Duration(seconds: 6)}) async {
-    final uri = Uri.parse(url);
     final client = HttpClient(context: KuaifeiOrigin.securityContext)
       ..connectionTimeout = timeout
       ..findProxy = (_) => 'DIRECT';
@@ -22,14 +21,35 @@ class OriginDnsBootstrap {
     };
 
     try {
-      final request = await client.getUrl(uri).timeout(timeout);
-      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final response = await request.close().timeout(timeout);
-      if (response.statusCode != HttpStatus.ok) return false;
-      final body = await utf8.decoder.bind(response).join().timeout(timeout);
-      final envelope = jsonDecode(body);
-      if (envelope is! Map) return false;
+      for (final url in urls) {
+        try {
+          final request = await client.getUrl(Uri.parse(url)).timeout(timeout);
+          request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+          final panelHost = _panelHost(preferences);
+          if (panelHost != null) {
+            request.headers.set('X-Kuaifei-Panel-Host', panelHost);
+          }
+          final response = await request.close().timeout(timeout);
+          if (response.statusCode != HttpStatus.ok) continue;
+          final body = await utf8.decoder.bind(response).join().timeout(timeout);
+          final config = await _verify(body);
+          if (config == null) continue;
+          if (config.revision == KuaifeiOrigin.config.revision) return false;
+          return KuaifeiOrigin.replace(preferences, config, onlyIfNewer: true);
+        } catch (_) {
+          // Try the compatibility endpoint before retaining the cached document.
+        }
+      }
+      return false;
+    } finally {
+      client.close(force: true);
+    }
+  }
 
+  static Future<OriginDnsConfig?> _verify(String body) async {
+    try {
+      final envelope = jsonDecode(body);
+      if (envelope is! Map) return null;
       final payload = base64Decode(envelope['payload']?.toString() ?? '');
       final signature = base64Decode(envelope['signature']?.toString() ?? '');
       final verified = await Ed25519().verify(
@@ -39,17 +59,11 @@ class OriginDnsBootstrap {
           publicKey: SimplePublicKey(base64Decode(_publicKeyBase64), type: KeyPairType.ed25519),
         ),
       );
-      if (!verified) return false;
-
-      return KuaifeiOrigin.replace(
-        preferences,
-        OriginDnsConfig.fromJson(jsonDecode(utf8.decode(payload))),
-        onlyIfNewer: true,
-      );
+      if (!verified) return null;
+      final config = OriginDnsConfig.fromJson(jsonDecode(utf8.decode(payload)));
+      return config.isUsable ? config : null;
     } catch (_) {
-      return false;
-    } finally {
-      client.close(force: true);
+      return null;
     }
   }
 
@@ -74,5 +88,17 @@ class OriginDnsBootstrap {
   static Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {
     if (!uri.isScheme('https')) return Future.value(socket);
     return SecureSocket.secure(socket, host: uri.host, context: KuaifeiOrigin.securityContext);
+  }
+
+  static String? _panelHost(SharedPreferences preferences) {
+    final candidates = [preferences.getString('auth_last_panel_url'), preferences.getString('auth_panel_url')];
+    for (final value in candidates) {
+      if (value == null || value.trim().isEmpty) continue;
+      final uri = Uri.tryParse(value.contains('://') ? value : 'https://$value');
+      final host = uri?.host.toLowerCase();
+      final normalizedHost = host == null ? null : KuaifeiOrigin.normalizeHost(host);
+      if (normalizedHost != null) return normalizedHost;
+    }
+    return null;
   }
 }

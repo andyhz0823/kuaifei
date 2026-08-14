@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:hiddify/core/db/db.dart';
+import 'package:hiddify/features/profile/model/profile_entity.dart';
 import 'package:hiddify/features/profile/model/profile_sort_enum.dart';
 import 'package:hiddify/utils/utils.dart';
 import 'package:loggy/loggy.dart';
@@ -11,6 +12,8 @@ abstract interface class ProfileDataSource {
   Future<ProfileEntry?> getById(String id);
   Future<ProfileEntry?> getByUrl(String url);
   Future<ProfileEntry?> getByName(String name);
+  Future<ProfileEntry?> getRemoteByName(String name);
+  Future<void> deleteRemoteDuplicatesByName(String name, {required String keepId});
   Stream<ProfileEntry?> watchActiveProfile();
   Stream<int> watchProfilesCount();
   Stream<List<ProfileEntry>> watchAll({required ProfilesSort sort, required SortMode sortMode});
@@ -44,6 +47,50 @@ class ProfileDao extends DatabaseAccessor<Db> with _$ProfileDaoMixin, InfraLogge
           ..where((tbl) => tbl.name.equals(name))
           ..limit(1))
         .getSingleOrNull();
+  }
+
+  @override
+  Future<ProfileEntry?> getRemoteByName(String name) async {
+    final exact =
+        await (select(profileEntries)
+              ..where((tbl) => tbl.name.equals(name) & tbl.type.equalsValue(ProfileType.remote))
+              ..orderBy([(tbl) => OrderingTerm(expression: tbl.lastUpdate, mode: OrderingMode.desc)])
+              ..limit(1))
+            .getSingleOrNull();
+    if (exact != null) return exact;
+
+    final candidates =
+        await (select(profileEntries)
+              ..where((tbl) => tbl.name.like('$name%') & tbl.type.equalsValue(ProfileType.remote))
+              ..orderBy([(tbl) => OrderingTerm(expression: tbl.lastUpdate, mode: OrderingMode.desc)]))
+            .get();
+    for (final entry in candidates) {
+      if (_isGeneratedDuplicateName(name, entry.name)) return entry;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> deleteRemoteDuplicatesByName(String name, {required String keepId}) async {
+    final candidates =
+        await (select(profileEntries)..where(
+              (tbl) => tbl.name.like('$name%') & tbl.type.equalsValue(ProfileType.remote) & tbl.id.equals(keepId).not(),
+            ))
+            .get();
+    final duplicateIds = candidates
+        .where((entry) => _isGeneratedDuplicateName(name, entry.name))
+        .map((entry) => entry.id)
+        .toList(growable: false);
+    for (final id in duplicateIds) {
+      await (delete(profileEntries)..where((tbl) => tbl.id.equals(id))).go();
+    }
+  }
+
+  bool _isGeneratedDuplicateName(String baseName, String candidate) {
+    if (candidate == baseName) return true;
+    if (!candidate.startsWith(baseName)) return false;
+    final suffix = candidate.substring(baseName.length);
+    return suffix.isNotEmpty && int.tryParse(suffix) != null;
   }
 
   @override

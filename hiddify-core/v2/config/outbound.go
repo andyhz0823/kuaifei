@@ -1,12 +1,16 @@
 package config
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"strings"
 
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common/json/badoption"
 )
 
 type outboundMap map[string]interface{}
@@ -139,6 +143,7 @@ func patchEndpoint(base *option.Endpoint, configOpt HiddifyOptions, staticIPs *m
 func patchOutbound(base option.Outbound, configOpt HiddifyOptions, staticIPs *map[string][]string) (*option.Outbound, error) {
 
 	patchOriginDomainResolver(&base, configOpt.OriginDNS, staticIPs)
+	patchOutboundECH(&base)
 	base = patchOutboundTLSTricks(base, configOpt)
 
 	// switch base.Type {
@@ -157,20 +162,178 @@ func patchOriginDomainResolver(base *option.Outbound, records map[string][]strin
 	}
 
 	serverDomain := normalizeOriginHost(opts.TakeServerOptions().Server)
-	addresses := matchOriginDNS(records, serverDomain)
-	if len(addresses) == 0 {
+	if serverDomain == "" {
 		return
 	}
-	(*staticIPs)[serverDomain] = addresses
 
+	// If the TCP connection server differs from TLS SNI or the WS/HTTP Host, the
+	// server is acting as a CDN/preferred front door. Keep that address dynamic so
+	// Cloudflare (or another CDN) can still return the best edge for the user's
+	// current network even if Xboard included the front-door in origin_dns.
+	if isFrontDoorOutbound(base, serverDomain) {
+		setOutboundDomainResolver(base, DNSDirectTag)
+		return
+	}
+
+	if addresses := matchOriginDNS(records, serverDomain); len(addresses) > 0 {
+		(*staticIPs)[serverDomain] = addresses
+		setOutboundDomainResolver(base, DNSStaticTag)
+		return
+	}
+
+	// Explicitly use direct DNS for ordinary proxy-server domains so they are not
+	// resolved through the selected proxy itself.
+	setOutboundDomainResolver(base, DNSDirectTag)
+}
+
+func setOutboundDomainResolver(base *option.Outbound, server string) {
 	if dialerOpts, ok := base.Options.(option.DialerOptionsWrapper); ok {
 		dialer := dialerOpts.TakeDialerOptions()
+		if dialer.DomainResolver != nil && dialer.DomainResolver.Server != "" {
+			return
+		}
 		dialer.DomainResolver = &option.DomainResolveOptions{
-			Server:   DNSStaticTag,
+			Server:   server,
 			Strategy: option.DomainStrategy(C.DomainStrategyPreferIPv4),
 		}
 		dialerOpts.ReplaceDialerOptions(dialer)
 	}
+}
+
+func isFrontDoorOutbound(base *option.Outbound, serverDomain string) bool {
+	if serverDomain == "" {
+		return false
+	}
+	if tlsopt, ok := base.Options.(option.OutboundTLSOptionsWrapper); ok {
+		if tls := tlsopt.TakeOutboundTLSOptions(); tls != nil {
+			if sni := normalizeOriginHost(tls.ServerName); sni != "" && sni != serverDomain {
+				return true
+			}
+		}
+	}
+	for _, host := range outboundTransportHosts(base) {
+		if normalized := normalizeOriginHost(host); normalized != "" && normalized != serverDomain {
+			return true
+		}
+	}
+	return false
+}
+
+func outboundTransportHosts(base *option.Outbound) []string {
+	var transport *option.V2RayTransportOptions
+	switch opts := base.Options.(type) {
+	case *option.VLESSOutboundOptions:
+		transport = opts.Transport
+	case *option.TrojanOutboundOptions:
+		transport = opts.Transport
+	case *option.VMessOutboundOptions:
+		transport = opts.Transport
+	}
+	if transport == nil {
+		return nil
+	}
+
+	hosts := make([]string, 0, 2)
+	switch transport.Type {
+	case C.V2RayTransportTypeHTTP:
+		for _, host := range transport.HTTPOptions.Host {
+			hosts = append(hosts, host)
+		}
+		hosts = appendHTTPHeaderHosts(hosts, transport.HTTPOptions.Headers)
+	case C.V2RayTransportTypeWebsocket:
+		hosts = appendHTTPHeaderHosts(hosts, transport.WebsocketOptions.Headers)
+	case C.V2RayTransportTypeHTTPUpgrade:
+		hosts = append(hosts, transport.HTTPUpgradeOptions.Host)
+		hosts = appendHTTPHeaderHosts(hosts, transport.HTTPUpgradeOptions.Headers)
+	case C.V2RayTransportTypeXHTTP:
+		hosts = append(hosts, strings.Split(transport.XHTTPOptions.Host, ",")...)
+		for key, value := range transport.XHTTPOptions.Headers {
+			if strings.EqualFold(key, "host") {
+				hosts = append(hosts, value)
+			}
+		}
+	}
+	return hosts
+}
+
+func appendHTTPHeaderHosts(hosts []string, headers badoption.HTTPHeader) []string {
+	for key, values := range headers {
+		if !strings.EqualFold(key, "host") {
+			continue
+		}
+		for _, value := range values {
+			hosts = append(hosts, value)
+		}
+	}
+	return hosts
+}
+
+func patchOutboundECH(base *option.Outbound) {
+	if base.Type == C.TypeSelector || base.Type == C.TypeURLTest || base.Type == C.TypeBlock || base.Type == C.TypeDNS {
+		return
+	}
+	if isOutboundReality(*base) {
+		return
+	}
+
+	tlsOpt, ok := base.Options.(option.OutboundTLSOptionsWrapper)
+	if !ok {
+		return
+	}
+	tls := tlsOpt.TakeOutboundTLSOptions()
+	if tls == nil || !tls.Enabled {
+		return
+	}
+
+	// Xboard/Hiddify subscriptions may include a placeholder-looking ECH config
+	// whose public name is ech.example.com. Do not disable ECH in that case: keep
+	// the user's node compatible by asking sing-box to fetch the real HTTPS/SVCB
+	// ECHConfigList for the subscription-provided SNI.
+	if tls.ECH != nil && tls.ECH.Enabled {
+		if hasDemoECHConfig(tls.ECH) && tls.ServerName != "" {
+			tls.ECH.Config = nil
+			tls.ECH.ConfigPath = ""
+			tls.ECH.QueryServerName = tls.ServerName
+			tlsOpt.ReplaceOutboundTLSOptions(tls)
+			return
+		}
+		if len(tls.ECH.Config) == 0 && tls.ECH.ConfigPath == "" && tls.ECH.QueryServerName == "" && tls.ServerName != "" {
+			tls.ECH.QueryServerName = tls.ServerName
+			tlsOpt.ReplaceOutboundTLSOptions(tls)
+		}
+	}
+}
+
+func dynamicECHOptions(serverName string) *option.OutboundECHOptions {
+	return &option.OutboundECHOptions{
+		Enabled:         true,
+		QueryServerName: serverName,
+	}
+}
+
+func hasDemoECHConfig(ech *option.OutboundECHOptions) bool {
+	if ech == nil || len(ech.Config) == 0 {
+		return false
+	}
+	joined := strings.Join([]string(ech.Config), "\n")
+	if strings.Contains(strings.ToLower(joined), "example.com") {
+		return true
+	}
+	if block, rest := pem.Decode([]byte(joined)); block != nil && strings.EqualFold(block.Type, "ECH CONFIGS") && len(bytes.TrimSpace(rest)) == 0 {
+		return bytes.Contains(bytes.ToLower(block.Bytes), []byte("example.com"))
+	}
+	compact := strings.Map(func(r rune) rune {
+		switch r {
+		case '\r', '\n', '\t', ' ':
+			return -1
+		default:
+			return r
+		}
+	}, joined)
+	if decoded, err := base64.StdEncoding.DecodeString(compact); err == nil {
+		return bytes.Contains(bytes.ToLower(decoded), []byte("example.com"))
+	}
+	return false
 }
 
 func normalizeOriginHost(host string) string {
@@ -182,12 +345,21 @@ func normalizeOriginHost(host string) string {
 		if parsedHost, err := getHostnameIfNotIP(domain); err == nil {
 			domain = parsedHost
 		}
+	} else if splitHost, _, err := net.SplitHostPort(domain); err == nil && splitHost != "" {
+		domain = splitHost
 	}
 	domain = strings.Trim(domain, "[]")
+	domain = strings.TrimSuffix(domain, ".")
+	for strings.HasPrefix(domain, "*.") {
+		domain = strings.TrimPrefix(domain, "*.")
+	}
+	if domain == "" || strings.Contains(domain, "*") {
+		return ""
+	}
 	if net.ParseIP(domain) != nil {
 		return ""
 	}
-	return strings.TrimSuffix(domain, ".")
+	return domain
 }
 
 func matchOriginDNS(records map[string][]string, host string) []string {

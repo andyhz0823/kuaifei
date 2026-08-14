@@ -40,8 +40,8 @@ func TuicSingbox(tuicUrl string) (*T.Outbound, error) {
 			OutboundTLSOptionsContainer: T.OutboundTLSOptionsContainer{
 				TLS: &T.OutboundTLSOptions{
 					Enabled:    true,
-					DisableSNI: decoded["sni"] == "",
-					ServerName: decoded["sni"],
+					DisableSNI: normalizeConnectionHost(decoded["sni"]) == "",
+					ServerName: normalizeConnectionHost(decoded["sni"]),
 					Insecure:   decoded["allowinsecure"] == "1" || decoded["insecure"] == "1",
 					ALPN:       []string{"h3", "spdy/3.1"},
 					ECH:        ECHOpts,

@@ -68,7 +68,7 @@ func VmessSingbox(vmessURL string) (*T.Outbound, error) {
 		Options: &T.VMessOutboundOptions{
 			DialerOptions: getDialerOptions(decoded),
 			ServerOptions: T.ServerOptions{
-				Server:     decoded["add"],
+				Server:     normalizeConnectionHost(decoded["add"]),
 				ServerPort: port,
 			},
 			UUID:                        decoded["id"],

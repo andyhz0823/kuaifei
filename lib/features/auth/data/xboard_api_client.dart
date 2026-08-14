@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -6,25 +8,38 @@ import 'package:hiddify/core/http_client/kuaifei_origin.dart';
 import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/features/auth/data/login_doh_resolver.dart';
 import 'package:hiddify/utils/custom_loggers.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class XboardApiClient with InfraLogger {
-  static const requestTimeout = Duration(seconds: 10);
+  static const subscriptionFlag = 'hiddify';
+  static const defaultUserAgent = 'hiddify/4.1.0';
+  static const requestTimeout = Duration(seconds: 8);
+  static const mappedConnectTimeout = Duration(seconds: 3);
+  static const prewarmTimeout = Duration(seconds: 2);
+  static const preferredEndpointTimeout = Duration(seconds: 3);
+  static const _directTransportId = 'panel-direct';
+  static const _fixedRelayTransportId = 'relay-xz';
 
   final Dio _dio;
   final Dio _relayDio;
   final Uri _baseUri;
   final LoginDohResolver _resolver;
+  final SharedPreferences? _preferences;
+  final Map<String, Dio> _transportDios = <String, Dio>{};
+  final Map<String, String> _transportUrls = <String, String>{};
 
-  XboardApiClient({required String baseUrl})
-    : _baseUri = Uri.parse(baseUrl.replaceAll(RegExp(r'/+$'), '')),
-      _resolver = LoginDohResolver(),
+  XboardApiClient({required String baseUrl, String userAgent = defaultUserAgent, SharedPreferences? preferences})
+    : _baseUri = Uri.parse(normalizeHttpUrl(baseUrl).replaceAll(RegExp(r'/+$'), '')),
+      _resolver = LoginDohResolver(preferences: preferences, timeout: const Duration(seconds: 2)),
+      _preferences = preferences,
       _dio = Dio(
         BaseOptions(
-          baseUrl: baseUrl.replaceAll(RegExp(r'/+$'), ''),
+          baseUrl: normalizeHttpUrl(baseUrl).replaceAll(RegExp(r'/+$'), ''),
           connectTimeout: requestTimeout,
           sendTimeout: requestTimeout,
           receiveTimeout: requestTimeout,
-          headers: {'User-Agent': 'kuaifei', 'Accept': 'application/json'},
+          responseType: ResponseType.bytes,
+          headers: {'User-Agent': userAgent, 'Accept': 'application/json'},
         ),
       ),
       _relayDio = Dio(
@@ -33,15 +48,95 @@ class XboardApiClient with InfraLogger {
           connectTimeout: requestTimeout,
           sendTimeout: requestTimeout,
           receiveTimeout: requestTimeout,
+          responseType: ResponseType.bytes,
           headers: {
-            'User-Agent': 'kuaifei',
+            'User-Agent': userAgent,
             'Accept': 'application/json',
-            'X-Kuaifei-Panel-Host': Uri.parse(baseUrl).host.toLowerCase(),
+            'X-Kuaifei-Panel-Host': Uri.parse(normalizeHttpUrl(baseUrl)).host.toLowerCase(),
           },
         ),
       ) {
     _configureAdapter(_dio);
     _configureAdapter(_relayDio);
+    _transportDios[_directTransportId] = _dio;
+    _transportUrls[_directTransportId] = _baseUri.toString();
+    _transportDios[_fixedRelayTransportId] = _relayDio;
+    _transportUrls[_fixedRelayTransportId] = Constants.distributionBaseUrl;
+    _configureDynamicEndpoints(userAgent);
+    _restorePreferredEndpoint();
+  }
+
+  void _configureDynamicEndpoints(String userAgent) {
+    final endpoints = <ClientAuthEndpoint>[...KuaifeiOrigin.config.authEndpoints];
+    if (endpoints.isEmpty) {
+      final cached = _preferences?.getString(KuaifeiOrigin.endpointPoolPreferenceKey);
+      if (cached != null && cached.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(cached);
+          if (decoded is List) {
+            endpoints.addAll(decoded.map(ClientAuthEndpoint.fromJson).where((endpoint) => endpoint.isUsable));
+          }
+        } catch (_) {
+          // A malformed endpoint cache is ignored; direct and fixed relay remain available.
+        }
+      }
+    }
+    endpoints.sort((left, right) => left.priority.compareTo(right.priority));
+
+    for (final endpoint in endpoints.take(8)) {
+      final normalizedUrl = normalizeHttpUrl(endpoint.url).replaceAll(RegExp(r'/+$'), '');
+      if (normalizedUrl.isEmpty || _transportUrls.containsValue(normalizedUrl)) continue;
+      final headers = <String, dynamic>{
+        'User-Agent': userAgent,
+        'Accept': 'application/json',
+        'X-Kuaifei-Panel-Host': _baseUri.host.toLowerCase(),
+      };
+      if (endpoint.routeId != null) headers['X-Kuaifei-Route-Id'] = endpoint.routeId;
+      final dio = Dio(
+        BaseOptions(
+          baseUrl: normalizedUrl,
+          connectTimeout: requestTimeout,
+          sendTimeout: requestTimeout,
+          receiveTimeout: requestTimeout,
+          responseType: ResponseType.bytes,
+          headers: headers,
+        ),
+      );
+      _configureAdapter(dio);
+      final transportId = endpoint.id.isEmpty ? 'endpoint-${_transportDios.length}' : endpoint.id;
+      _transportDios[transportId] = dio;
+      _transportUrls[transportId] = normalizedUrl;
+    }
+  }
+
+  void _restorePreferredEndpoint() {
+    final cached = _preferences?.getString(KuaifeiOrigin.lastKnownGoodEndpointPreferenceKey);
+    if (cached == null || cached.isEmpty) return;
+    try {
+      final decoded = jsonDecode(cached);
+      final cachedUrl = decoded is Map ? decoded['url']?.toString() : decoded.toString();
+      if (cachedUrl == null || cachedUrl.isEmpty) return;
+      final normalized = normalizeHttpUrl(cachedUrl).replaceAll(RegExp(r'/+$'), '');
+      for (final entry in _transportUrls.entries) {
+        if (entry.value == normalized) {
+          _preferredTransport = entry.key;
+          break;
+        }
+      }
+    } catch (_) {
+      // Ignore malformed last-known-good endpoint state.
+    }
+  }
+
+  void _rememberSuccessfulEndpoint(String transport) {
+    final endpointUrl = _transportUrls[transport];
+    if (endpointUrl == null || _preferences == null) return;
+    unawaited(
+      _preferences.setString(
+        KuaifeiOrigin.lastKnownGoodEndpointPreferenceKey,
+        jsonEncode({'id': transport, 'url': endpointUrl, 'saved_at': DateTime.now().millisecondsSinceEpoch}),
+      ),
+    );
   }
 
   void _configureAdapter(Dio dio) {
@@ -58,51 +153,61 @@ class XboardApiClient with InfraLogger {
     );
   }
 
-  bool get _canUseRelay {
-    final host = _baseUri.host.toLowerCase();
-    return host == 'kuaifei.top' || host.endsWith('.kuaifei.top');
-  }
+  String? _preferredTransport;
 
   Future<void> prewarm() async {
-    if (_canUseRelay) {
-      final relayHost = Uri.parse(Constants.distributionBaseUrl).host;
-      final addresses = KuaifeiOrigin.connectionAddressesForHost(relayHost);
-      loggy.debug('Auth: using DNS-independent login relay at $relayHost: ${addresses.join(', ')}');
-      return;
-    }
-
     final cached = KuaifeiOrigin.addressesForHost(_baseUri.host);
     if (cached.isNotEmpty) {
       loggy.debug('Auth: loaded cached origin routing for ${_baseUri.host}: ${cached.join(', ')}');
       return;
     }
 
-    final resolution = await _resolver.resolve(_baseUri.host, includeHttps: true);
-    final echStatus = resolution.hasEchConfig ? 'with ECH config' : 'without ECH config';
-    loggy.debug(
-      'Auth: DoH resolved ${_baseUri.host} to ${resolution.addresses.map((e) => e.address).join(', ')} ($echStatus)',
+    // DoH prewarm is deliberately best-effort. Login itself races the direct
+    // path and the relay path, so prewarm must never add seconds of spinner time.
+    unawaited(
+      _resolver
+          .resolve(_baseUri.host, includeIpv6: false)
+          .timeout(prewarmTimeout)
+          .then((resolution) {
+            loggy.debug(
+              'Auth: DoH prewarmed ${_baseUri.host} to ${resolution.addresses.map((e) => e.address).join(', ')}',
+            );
+          })
+          .catchError((Object error) {
+            loggy.debug('Auth: DoH prewarm skipped for ${_baseUri.host}: $error');
+          }),
     );
   }
 
   Future<Socket> _connectForUri(Uri uri) async {
-    final dohFuture = _resolver.resolve(uri.host, includeHttps: true);
     final cached = KuaifeiOrigin.connectionAddressesForHost(uri.host).map(InternetAddress.new).toList(growable: false);
-    Object? cachedError;
+    Object? lastError;
     if (cached.isNotEmpty) {
       try {
-        final socket = await _connectFirstAvailable(cached, uri.port, timeout: const Duration(seconds: 3));
+        final socket = await _connectFirstAvailable(cached, uri.port, timeout: mappedConnectTimeout);
         return _secureIfNeeded(uri, socket);
       } catch (error) {
-        cachedError = error;
+        lastError = error;
       }
     }
 
     try {
-      final resolution = await dohFuture;
-      final socket = await _connectFirstAvailable(resolution.addresses, uri.port);
+      final resolution = await _resolver.resolve(uri.host).timeout(requestTimeout);
+      if (resolution.addresses.isNotEmpty) {
+        final socket = await _connectFirstAvailable(resolution.addresses, uri.port, timeout: mappedConnectTimeout);
+        return _secureIfNeeded(uri, socket);
+      }
+    } catch (error) {
+      lastError = error;
+    }
+
+    // Last local fallback: let the platform resolver try. If DNS is polluted,
+    // hostname verification should fail after TLS and the relay race can still win.
+    try {
+      final socket = await Socket.connect(uri.host, uri.port, timeout: mappedConnectTimeout);
       return _secureIfNeeded(uri, socket);
     } catch (error) {
-      throw SocketException('Cached and DoH endpoints failed for ${uri.host}: ${cachedError ?? error}');
+      throw SocketException('Cached, DoH and system endpoints failed for ${uri.host}: ${lastError ?? error}');
     }
   }
 
@@ -111,6 +216,7 @@ class XboardApiClient with InfraLogger {
     int port, {
     Duration timeout = requestTimeout,
   }) async {
+    if (addresses.isEmpty) throw const SocketException('No resolved addresses available');
     Object? lastError;
     for (final address in addresses) {
       try {
@@ -119,7 +225,7 @@ class XboardApiClient with InfraLogger {
         lastError = error;
       }
     }
-    throw SocketException('Unable to connect to DoH resolved address: $lastError');
+    throw SocketException('Unable to connect to resolved address: $lastError');
   }
 
   Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {
@@ -128,42 +234,58 @@ class XboardApiClient with InfraLogger {
   }
 
   void setToken(String token) {
-    _dio.options.headers['Authorization'] = 'Bearer $token';
-    _relayDio.options.headers['Authorization'] = 'Bearer $token';
+    for (final dio in _transportDios.values.toSet()) {
+      dio.options.headers['Authorization'] = 'Bearer $token';
+    }
   }
 
   void clearToken() {
-    _dio.options.headers.remove('Authorization');
-    _relayDio.options.headers.remove('Authorization');
+    for (final dio in _transportDios.values.toSet()) {
+      dio.options.headers.remove('Authorization');
+    }
   }
 
   Map<String, dynamic>? _responseBody(Response<dynamic> response) {
     final body = response.data;
     if (body is Map<String, dynamic>) return body;
     if (body is Map) return Map<String, dynamic>.from(body);
+    if (body is List<int>) {
+      final decoded = jsonDecode(utf8.decode(body));
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    }
+    if (body is String) {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    }
     return null;
   }
 
   Future<XboardLoginResult> login({required String email, required String password}) async {
     final response = await _requestWithOriginFallback(
-      (dio) => dio.post('/api/v1/passport/auth/login', data: {'email': email, 'password': password}),
+      (dio, cancelToken) => dio.post(
+        '/api/v1/passport/auth/login',
+        data: {'email': email, 'password': password},
+        cancelToken: cancelToken,
+      ),
     );
 
     final body = _responseBody(response);
     if (body == null || body['status'] != 'success') {
-      throw XboardApiException(body?['message']?.toString() ?? '登录失败，请检查账号密码');
+      throw XboardApiException(body?['message']?.toString() ?? 'Login failed, please check account and password');
     }
 
     final data = body['data'] as Map<String, dynamic>?;
     if (data == null) {
-      throw XboardApiException('登录返回数据异常');
+      throw XboardApiException('Login response data is invalid');
     }
 
     final subscriptionToken = data['token']?.toString();
     final authData = data['auth_data']?.toString();
 
     if (subscriptionToken == null || authData == null) {
-      throw XboardApiException('登录返回数据不完整');
+      throw XboardApiException('Login response is incomplete');
     }
 
     final sanctumToken = authData.startsWith('Bearer ') ? authData.substring(7) : authData;
@@ -176,36 +298,45 @@ class XboardApiClient with InfraLogger {
   }
 
   Future<XboardSubscribeResult> getSubscribe() async {
-    final response = await _requestWithOriginFallback((dio) => dio.get('/api/v1/user/getSubscribe'));
+    final response = await _requestWithOriginFallback(
+      (dio, cancelToken) => dio.get('/api/v1/user/getSubscribe', cancelToken: cancelToken),
+    );
 
     final body = _responseBody(response);
     if (body == null || body['status'] != 'success') {
-      throw XboardApiException(body?['message']?.toString() ?? '获取订阅信息失败');
+      throw XboardApiException(body?['message']?.toString() ?? 'Login failed, please check account and password');
     }
 
     final data = body['data'] as Map<String, dynamic>?;
     if (data == null) {
-      throw XboardApiException('订阅数据异常');
+      throw XboardApiException('Subscription response data is invalid');
     }
 
-    final subscriptions = XboardSubscriptionProfile.fromList(data['subscriptions']);
+    var subscriptions = XboardSubscriptionProfile.fromList(data['subscriptions']);
+    if (subscriptions.isEmpty) subscriptions = XboardSubscriptionProfile.fromList(data['plans']);
+    if (subscriptions.isEmpty) subscriptions = XboardSubscriptionProfile.fromList(data['profiles']);
+
+    final subscribeUrl = firstString(data, const ['subscribe_url', 'subscription_url', 'subscribeUrl', 'url', 'link']);
+    final fallbackName = data['plan'] is Map
+        ? firstString(Map<String, dynamic>.from(data['plan'] as Map), const ['name', 'plan_name', 'title'])
+        : firstString(data, const ['plan_name', 'name', 'title']);
     final fallbackProfile = XboardSubscriptionProfile(
-      subscribeUrl: normalizeHttpUrl(data['subscribe_url']?.toString() ?? ''),
-      name: data['plan'] is Map ? (data['plan'] as Map)['name']?.toString() : null,
+      subscribeUrl: normalizeSubscriptionUrl(subscribeUrl),
+      name: fallbackName.isEmpty ? null : fallbackName,
       planId: intOrNull(data['plan_id']),
-      upload: intOrNull(data['u']),
-      download: intOrNull(data['d']),
-      total: intOrNull(data['transfer_enable']),
-      expireAt: intOrNull(data['expired_at']),
+      upload: intOrNull(data['u'] ?? data['upload']),
+      download: intOrNull(data['d'] ?? data['download']),
+      total: intOrNull(data['transfer_enable'] ?? data['total']),
+      expireAt: intOrNull(data['expired_at'] ?? data['expire_at'] ?? data['expire']),
     );
 
     return XboardSubscribeResult(
-      subscribeUrl: data['subscribe_url']?.toString() ?? '',
+      subscribeUrl: fallbackProfile.subscribeUrl,
       subscriptions: subscriptions.isNotEmpty
           ? subscriptions
           : [if (fallbackProfile.subscribeUrl.isNotEmpty) fallbackProfile],
       planId: intOrNull(data['plan_id']),
-      expiredAt: data['expired_at']?.toString(),
+      expiredAt: data['expired_at']?.toString() ?? data['expire_at']?.toString(),
       email: data['email']?.toString(),
       token: data['token']?.toString(),
       appConfig: XboardAppConfig.fromJson(data['client_config'] ?? data['app_config']),
@@ -218,21 +349,114 @@ class XboardApiClient with InfraLogger {
     return int.tryParse(value?.toString() ?? '');
   }
 
-  static String normalizeHttpUrl(String url) {
-    final normalized = url.trim();
-    if (normalized.isEmpty || normalized.contains('://')) return normalized;
-    return 'https://$normalized';
+  static String firstString(Map<String, dynamic> json, List<String> keys) {
+    for (final key in keys) {
+      final value = json[key];
+      if (value == null) continue;
+      final text = value.toString().trim();
+      if (text.isNotEmpty) return text;
+    }
+    return '';
   }
 
-  Future<Response<dynamic>> _requestWithOriginFallback(Future<Response<dynamic>> Function(Dio dio) request) async {
-    if (!_canUseRelay) return request(_dio);
+  static String normalizeSubscriptionUrl(String url) {
+    final normalized = normalizeHttpUrl(url);
+    if (normalized.isEmpty) return normalized;
+    final uri = Uri.tryParse(normalized);
+    if (uri == null || uri.host.isEmpty) return normalized;
+    final query = Map<String, String>.from(uri.queryParameters);
+    query['flag'] = subscriptionFlag;
+    return uri.replace(queryParameters: query).toString();
+  }
 
-    try {
-      return await request(_relayDio);
-    } catch (relayError, stackTrace) {
-      loggy.warning('Auth: login relay failed; trying the panel directly', relayError, stackTrace);
-      return request(_dio);
+  static String normalizeHttpUrl(String url) {
+    final normalized = url.trim();
+    if (normalized.isEmpty) return normalized;
+    final withScheme = normalized.contains('://') ? normalized : 'https://$normalized';
+    final uri = Uri.tryParse(withScheme);
+    if (uri == null) return withScheme;
+    final canonicalHost = KuaifeiOrigin.normalizeHost(uri.host);
+    if (canonicalHost == null || canonicalHost == uri.host) return withScheme;
+    return uri.replace(host: canonicalHost).toString();
+  }
+
+  Future<Response<dynamic>> _requestWithOriginFallback(
+    Future<Response<dynamic>> Function(Dio dio, CancelToken cancelToken) request,
+  ) async {
+    final preferred = _preferredTransport;
+    if (preferred != null && _transportDios.containsKey(preferred)) {
+      try {
+        return await _sendVia(preferred, request).timeout(preferredEndpointTimeout);
+      } catch (error, stackTrace) {
+        loggy.warning('Auth: preferred $preferred path failed; racing all paths', error, stackTrace);
+        _preferredTransport = null;
+      }
     }
+
+    return _raceTransports(request);
+  }
+
+  Future<Response<dynamic>> _sendVia(
+    String transport,
+    Future<Response<dynamic>> Function(Dio dio, CancelToken cancelToken) request,
+  ) async {
+    final cancelToken = CancelToken();
+    try {
+      final response = await request(_dioFor(transport), cancelToken).timeout(requestTimeout);
+      _preferredTransport = transport;
+      _rememberSuccessfulEndpoint(transport);
+      loggy.debug('Auth: $transport path succeeded');
+      return response;
+    } finally {
+      if (!cancelToken.isCancelled) cancelToken.cancel('auth request completed');
+    }
+  }
+
+  Future<Response<dynamic>> _raceTransports(
+    Future<Response<dynamic>> Function(Dio dio, CancelToken cancelToken) request,
+  ) {
+    final completer = Completer<Response<dynamic>>();
+    final cancelTokens = <String, CancelToken>{for (final transport in _transportDios.keys) transport: CancelToken()};
+    final errors = <Object>[];
+    var pending = cancelTokens.length;
+
+    void completeSuccess(String transport, Response<dynamic> response) {
+      if (completer.isCompleted) return;
+      _preferredTransport = transport;
+      _rememberSuccessfulEndpoint(transport);
+      loggy.debug('Auth: $transport path won the login race');
+      for (final entry in cancelTokens.entries) {
+        if (entry.key != transport && !entry.value.isCancelled) {
+          entry.value.cancel('auth $transport path won');
+        }
+      }
+      completer.complete(response);
+    }
+
+    void completeFailure(Object error, StackTrace stackTrace) {
+      if (completer.isCompleted) return;
+      errors.add(error);
+      pending -= 1;
+      if (pending == 0) {
+        completer.completeError(errors.isEmpty ? error : errors.last, stackTrace);
+      }
+    }
+
+    for (final entry in cancelTokens.entries) {
+      final transport = entry.key;
+      request(
+        _dioFor(transport),
+        entry.value,
+      ).timeout(requestTimeout).then((response) => completeSuccess(transport, response), onError: completeFailure);
+    }
+
+    return completer.future;
+  }
+
+  Dio _dioFor(String transport) {
+    final dio = _transportDios[transport];
+    if (dio == null) throw StateError('Unknown auth transport: $transport');
+    return dio;
   }
 }
 
@@ -320,32 +544,29 @@ class XboardSubscriptionProfile {
     return value
         .whereType<Map>()
         .map((item) => Map<String, dynamic>.from(item))
-        .map(
-          (item) => XboardSubscriptionProfile(
-            subscribeUrl: XboardApiClient.normalizeHttpUrl(item['subscribe_url']?.toString() ?? ''),
-            name: item['plan_name']?.toString(),
-            planId: XboardApiClient.intOrNull(item['plan_id']),
-            subscriptionId: XboardApiClient.intOrNull(item['id']),
-            upload: XboardApiClient.intOrNull(item['u'] ?? item['upload']),
-            download: XboardApiClient.intOrNull(item['d'] ?? item['download']),
-            total: XboardApiClient.intOrNull(item['transfer_enable'] ?? item['total']),
-            expireAt: XboardApiClient.intOrNull(item['expired_at'] ?? item['expire_at'] ?? item['expire']),
-          ),
-        )
+        .map(XboardSubscriptionProfile.fromJson)
         .where((item) => item.subscribeUrl.isNotEmpty)
         .toList(growable: false);
   }
 
   factory XboardSubscriptionProfile.fromJson(Map<String, dynamic> json) {
+    final subscribeUrl = XboardApiClient.firstString(json, const [
+      'subscribe_url',
+      'subscription_url',
+      'subscribeUrl',
+      'url',
+      'link',
+    ]);
+    final name = XboardApiClient.firstString(json, const ['plan_name', 'name', 'title']);
     return XboardSubscriptionProfile(
-      subscribeUrl: json['subscribe_url']?.toString() ?? '',
-      name: json['name']?.toString(),
+      subscribeUrl: XboardApiClient.normalizeSubscriptionUrl(subscribeUrl),
+      name: name.isEmpty ? null : name,
       planId: XboardApiClient.intOrNull(json['plan_id']),
-      subscriptionId: XboardApiClient.intOrNull(json['subscription_id']),
-      upload: XboardApiClient.intOrNull(json['upload']),
-      download: XboardApiClient.intOrNull(json['download']),
-      total: XboardApiClient.intOrNull(json['total']),
-      expireAt: XboardApiClient.intOrNull(json['expire_at']),
+      subscriptionId: XboardApiClient.intOrNull(json['id'] ?? json['subscription_id']),
+      upload: XboardApiClient.intOrNull(json['u'] ?? json['upload']),
+      download: XboardApiClient.intOrNull(json['d'] ?? json['download']),
+      total: XboardApiClient.intOrNull(json['transfer_enable'] ?? json['total']),
+      expireAt: XboardApiClient.intOrNull(json['expired_at'] ?? json['expire_at'] ?? json['expire']),
     );
   }
 }

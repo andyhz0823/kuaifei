@@ -11,7 +11,7 @@ func HysteriaSingbox(hysteriaURL string) (*T.Outbound, error) {
 	if err != nil {
 		return nil, err
 	}
-	SNI := u.Params["peer"]
+	SNI := normalizeConnectionHost(u.Params["peer"])
 	opts := T.HysteriaOutboundOptions{
 		ServerOptions: u.GetServerOption(),
 		OutboundTLSOptionsContainer: T.OutboundTLSOptionsContainer{

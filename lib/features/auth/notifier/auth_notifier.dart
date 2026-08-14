@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:drift/drift.dart';
 import 'package:fpdart/fpdart.dart';
+import 'package:hiddify/core/app_info/app_info_provider.dart';
 import 'package:hiddify/core/db/db.dart';
 import 'package:hiddify/core/db/provider/db_providers.dart';
 import 'package:hiddify/core/directories/directories_provider.dart';
@@ -12,7 +13,6 @@ import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/core/preferences/preferences_provider.dart';
 import 'package:hiddify/features/auth/data/origin_dns_bootstrap.dart';
 import 'package:hiddify/features/auth/data/xboard_api_client.dart';
-import 'package:hiddify/features/connection/notifier/connection_notifier.dart';
 import 'package:hiddify/features/profile/data/profile_data_providers.dart';
 import 'package:hiddify/features/profile/data/profile_repository.dart';
 import 'package:hiddify/features/profile/model/profile_entity.dart';
@@ -27,19 +27,27 @@ enum AuthStatus { idle, loading, authenticated, error }
 final authNotifierProvider = AsyncNotifierProvider<AuthNotifier, AuthStatus>(() => AuthNotifier());
 
 class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
-  static const _loginTimeout = Duration(seconds: 30);
+  static const _loginTimeout = Duration(seconds: 25);
   static const _loginTimeoutMessage = '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top';
-  static const _defaultPurchaseUrl = 'https://*.kuaifei.top(*换为任意字母或数字，APP登录不上也换为这类地址即可)';
+  // ignore: unused_field
+  static const _defaultPurchaseUrl = Constants.purchaseUrl;
   static const _legacyPurchaseUrl = 'https://kuaifei.top';
   static const _defaultContactEmail = 'wahiya562@gmail.com';
   static const _legacyContactEmail = 'mahiya562@gmail.com';
+  static const _profileRefreshInterval = Duration(minutes: 30);
   Timer? _originRefreshTimer;
+  Timer? _profileRefreshTimer;
+  bool _originRefreshInFlight = false;
+  bool _profileRefreshInFlight = false;
 
   @override
   Future<AuthStatus> build() async {
     KuaifeiOrigin.restore(_prefs);
-    ref.onDispose(() => _originRefreshTimer?.cancel());
-    // Don't auto-login on startup — show the login page, let user click login
+    ref.onDispose(() {
+      _originRefreshTimer?.cancel();
+      _profileRefreshTimer?.cancel();
+    });
+    // Don't auto-login on startup - show the login page, let user click login
     return AuthStatus.idle;
   }
 
@@ -92,14 +100,18 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   Future<void> login({required String panelUrl, required String email, required String password}) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
-      final normalizedUrl = panelUrl.replaceAll(RegExp(r'/+$'), '');
+      final normalizedUrl = XboardApiClient.normalizeHttpUrl(panelUrl).replaceAll(RegExp(r'/+$'), '');
       await _rememberLastLoginInput(panelUrl: normalizedUrl, email: email, password: password);
 
-      // Refresh independently of the panel DNS. This remains usable when the
-      // panel hostname is polluted or its origin address has changed.
-      await OriginDnsBootstrap.refresh(_prefs);
+      // Bootstrap refresh must never sit on the login critical path. The
+      // currently cached signed config is already available to XboardApiClient.
+      unawaited(_refreshBootstrapConfig());
 
-      final client = XboardApiClient(baseUrl: normalizedUrl);
+      final client = XboardApiClient(
+        baseUrl: normalizedUrl,
+        userAgent: ref.read(appInfoProvider).requireValue.userAgent,
+        preferences: _prefs,
+      );
 
       loggy.debug('Auth: logging in to $normalizedUrl as $email');
       final (:loginResult, :subscribeResult) = await (() async {
@@ -117,20 +129,11 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       await _writePreference('auth_email', email);
       await _persistSubscribeResult(subscribeResult);
 
-      if (subscriptionProfiles.isEmpty) {
-        await clearLocalProfileData();
-        ref.invalidate(activeProfileProvider);
-        loggy.info('Auth: no usable subscriptions; local profiles cleared');
-      } else {
-        try {
-          await _syncStoredSubscriptionsToProfiles(removeObsoleteProfiles: true, throwOnTotalFailure: true);
-        } catch (e, st) {
-          loggy.warning('Auth: subscription import failed, but login succeeded', e, st);
-        }
-      }
-
+      // Authentication is complete once credentials and subscription metadata
+      // are durable. Profile downloads can be slow and must run in background.
       loggy.debug('Auth: login successful for $email');
-      _scheduleOriginRefresh();
+      _scheduleRefreshes();
+      unawaited(_syncProfilesAfterLogin());
       return AuthStatus.authenticated;
     });
   }
@@ -155,15 +158,16 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       await _writePreference('auth_subscribe_url', subscribeResult.subscribeUrl);
     }
 
-    final profiles =
-        (subscribeResult.subscriptions.isNotEmpty
-                ? subscribeResult.subscriptions
-                : [
-                    if (subscribeResult.subscribeUrl.isNotEmpty)
-                      XboardSubscriptionProfile(subscribeUrl: subscribeResult.subscribeUrl),
-                  ])
-            .where((profile) => profile.isUsable)
-            .toList(growable: false);
+    // Keep the aggregate URL only as account metadata. The customized client
+    // imports the per-plan profiles returned by XBoard and must never pull the
+    // aggregate Default subscription URL.
+    final profiles = <XboardSubscriptionProfile>[];
+    final knownUrls = <String>{};
+    for (final profile in subscribeResult.subscriptions) {
+      final url = profile.subscribeUrl;
+      if (url.isEmpty || !knownUrls.add(url)) continue;
+      profiles.add(profile);
+    }
     await _writePreference('auth_subscribe_profiles', jsonEncode(profiles.map((item) => item.toJson()).toList()));
 
     final appConfig = subscribeResult.appConfig;
@@ -178,36 +182,82 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     final config = subscribeResult.appConfig.originDns;
     if (config == null || !config.isUsable) return false;
     final previousRevision = KuaifeiOrigin.config.revision;
-    final saved = await KuaifeiOrigin.replace(_prefs, config);
-    if (saved) {
-      loggy.info('Auth: applied origin DNS revision ${config.revision} from ${config.source}');
+    try {
+      final saved = await KuaifeiOrigin.replace(_prefs, config);
+      if (saved) {
+        loggy.info('Auth: applied origin DNS revision ${config.revision} from ${config.source}');
+      }
+      return saved && previousRevision != config.revision;
+    } on OriginDnsRevisionCollision catch (error, stackTrace) {
+      // A reused revision with different contents is a server configuration
+      // error. Keep the last-known-good document without failing login.
+      loggy.warning('Auth: rejected conflicting origin DNS revision ${config.revision}', error, stackTrace);
+      return false;
     }
-    return saved && previousRevision != config.revision;
   }
 
-  void _scheduleOriginRefresh() {
+  Future<void> _syncProfilesAfterLogin() async {
+    try {
+      await _removeLegacyDefaultSubscriptionProfile();
+      if (subscriptionProfiles.isEmpty) {
+        await clearLocalProfileData();
+        ref.invalidate(activeProfileProvider);
+        loggy.info('Auth: no usable subscriptions; local profiles cleared');
+        return;
+      }
+      await _syncStoredSubscriptionsToProfiles(removeObsoleteProfiles: true, throwOnTotalFailure: true);
+    } catch (error, stackTrace) {
+      loggy.warning('Auth: background subscription import failed; login remains authenticated', error, stackTrace);
+    }
+  }
+
+  void _scheduleRefreshes() {
     _originRefreshTimer?.cancel();
-    final interval = KuaifeiOrigin.config.refreshInterval;
-    _originRefreshTimer = Timer.periodic(interval, (_) => _refreshOriginDnsAndProfiles());
+    _profileRefreshTimer?.cancel();
+
+    final originInterval = KuaifeiOrigin.config.bootstrapRefreshInterval;
+    _originRefreshTimer = Timer.periodic(originInterval, (_) => unawaited(_refreshBootstrapConfig()));
+    _profileRefreshTimer = Timer.periodic(_profileRefreshInterval, (_) => unawaited(_refreshSubscriptionProfiles()));
   }
 
-  Future<void> _refreshOriginDnsAndProfiles() async {
+  Future<void> _refreshBootstrapConfig() async {
+    if (_originRefreshInFlight) return;
+    _originRefreshInFlight = true;
+    try {
+      final changed = await OriginDnsBootstrap.refresh(_prefs, timeout: const Duration(seconds: 4));
+      if (changed) {
+        loggy.info('Auth: refreshed signed bootstrap revision ${KuaifeiOrigin.config.revision}');
+        _scheduleRefreshes();
+      }
+    } catch (error, stackTrace) {
+      loggy.warning('Auth: bootstrap refresh failed; keeping last-known-good config', error, stackTrace);
+    } finally {
+      _originRefreshInFlight = false;
+    }
+  }
+
+  Future<void> _refreshSubscriptionProfiles() async {
+    if (_profileRefreshInFlight) return;
     final savedPanelUrl = panelUrl;
     final token = sanctumToken;
     if (savedPanelUrl == null || token == null || token.isEmpty) return;
 
+    _profileRefreshInFlight = true;
     try {
-      final client = XboardApiClient(baseUrl: savedPanelUrl)..setToken(token);
+      final client = XboardApiClient(
+        baseUrl: savedPanelUrl,
+        userAgent: ref.read(appInfoProvider).requireValue.userAgent,
+        preferences: _prefs,
+      )..setToken(token);
       final result = await client.getSubscribe().timeout(_loginTimeout);
       final changed = await _persistOriginDns(result);
       await _persistSubscribeResult(result);
-      await _syncStoredSubscriptionsToProfiles();
-      if (changed) {
-        await ref.read(connectionNotifierProvider.notifier).reconnect(await ref.read(activeProfileProvider.future));
-        _scheduleOriginRefresh();
-      }
+      await _syncStoredSubscriptionsToProfiles(removeObsoleteProfiles: true);
+      if (changed) _scheduleRefreshes();
     } catch (error, stackTrace) {
-      loggy.warning('Auth: periodic origin DNS refresh failed; keeping last-known-good config', error, stackTrace);
+      loggy.warning('Auth: periodic subscription refresh failed; keeping existing profiles', error, stackTrace);
+    } finally {
+      _profileRefreshInFlight = false;
     }
   }
 
@@ -218,7 +268,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     final panelUrl = _readPanelUrl();
     final token = _readSubscriptionToken();
     if (panelUrl == null || token == null) return null;
-    return '$panelUrl/s/$token';
+    return XboardApiClient.normalizeSubscriptionUrl('$panelUrl/s/$token');
   }
 
   List<XboardSubscriptionProfile> get subscriptionProfiles {
@@ -238,9 +288,26 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       }
     }
 
-    final fallbackUrl = subscribeUrl;
-    if (fallbackUrl == null || fallbackUrl.isEmpty) return const [];
-    return [XboardSubscriptionProfile(subscribeUrl: fallbackUrl)];
+    return const [];
+  }
+
+  Future<void> _removeLegacyDefaultSubscriptionProfile() async {
+    final defaultUrl = subscribeUrl;
+    final repo = await ref.read(profileRepositoryProvider.future);
+    final db = ref.read(dbProvider);
+    final entries = await db.select(db.profileEntries).get();
+
+    for (final entry in entries) {
+      final isDefaultUrl = defaultUrl != null && defaultUrl.isNotEmpty && entry.url == defaultUrl;
+      final isDefaultName = entry.name == 'Default subscription URL';
+      if (!isDefaultUrl && !isDefaultName) continue;
+
+      final result = await repo.deleteById(entry.id, entry.active).run();
+      result.match(
+        (failure) => loggy.warning('Auth: failed to remove legacy Default subscription profile ${entry.id}', failure),
+        (_) => loggy.info('Auth: removed legacy Default subscription profile ${entry.id}'),
+      );
+    }
   }
 
   Future<void> _syncStoredSubscriptionsToProfiles({
@@ -429,6 +496,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
 
   Future<void> logout() async {
     _originRefreshTimer?.cancel();
+    _profileRefreshTimer?.cancel();
     await _removePreference('auth_panel_url');
     await _removePreference('auth_sanctum_token');
     await _removePreference('auth_subscription_token');

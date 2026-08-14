@@ -29,9 +29,9 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 		return T.OutboundTLSOptionsContainer{TLS: nil}
 	}
 
-	serverName := decoded["sni"]
+	serverName := normalizeConnectionHost(decoded["sni"])
 	if serverName == "" {
-		serverName = decoded["add"]
+		serverName = normalizeConnectionHost(decoded["add"])
 	}
 
 	var ECHOpts *option.OutboundECHOptions
@@ -157,6 +157,7 @@ func getMuxOptions(decoded map[string]string) *option.OutboundMultiplexOptions {
 func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptions, error) {
 	var transportOptions option.V2RayTransportOptions
 	host, net, path := decoded["host"], decoded["net"], decoded["path"]
+	hosts := normalizeHostHeaderList(host)
 	if net == "" {
 		net = decoded["type"]
 	}
@@ -179,8 +180,8 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 		if decoded["security"] != "tls" {
 			transportOptions.HTTPOptions.Method = "GET"
 		}
-		if host != "" {
-			transportOptions.HTTPOptions.Host = badoption.Listable[string]{host}
+		if len(hosts) > 0 {
+			transportOptions.HTTPOptions.Host = badoption.Listable[string](hosts)
 		}
 		httpPath := path
 		if httpPath == "" {
@@ -190,8 +191,8 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 	case "httpupgrade":
 		decoded["alpn"] = "http/1.1"
 		transportOptions.Type = C.V2RayTransportTypeHTTPUpgrade
-		if host != "" {
-			transportOptions.HTTPUpgradeOptions.Headers = badoption.HTTPHeader{"Host": {host}}
+		if len(hosts) > 0 {
+			transportOptions.HTTPUpgradeOptions.Headers = badoption.HTTPHeader{"Host": hosts}
 		}
 		if path != "" {
 			if !strings.HasPrefix(path, "/") {
@@ -219,8 +220,8 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 		decoded["alpn"] = "http/1.1"
 
 		transportOptions.Type = C.V2RayTransportTypeWebsocket
-		if host != "" {
-			transportOptions.WebsocketOptions.Headers = badoption.HTTPHeader{"Host": {host}}
+		if len(hosts) > 0 {
+			transportOptions.WebsocketOptions.Headers = badoption.HTTPHeader{"Host": hosts}
 		}
 		if path != "" {
 			if !strings.HasPrefix(path, "/") {
@@ -262,7 +263,7 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 		transportOptions.XHTTPOptions = option.V2RayXHTTPOptions{
 			Mode: getOneOfN(decoded, "auto", "mode"),
 			V2RayXHTTPBaseOptions: option.V2RayXHTTPBaseOptions{
-				Host: host,
+				Host: strings.Join(hosts, ","),
 				Path: path,
 			},
 		}
@@ -275,8 +276,9 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			}
 			transportOptions.XHTTPOptions.V2RayXHTTPBaseOptions = x.V2RayXHTTPBaseOptions
 			if transportOptions.XHTTPOptions.Host == "" {
-				transportOptions.XHTTPOptions.Host = host
+				transportOptions.XHTTPOptions.Host = strings.Join(hosts, ",")
 			}
+			transportOptions.XHTTPOptions.Host = strings.Join(normalizeHostHeaderList(transportOptions.XHTTPOptions.Host), ",")
 			if transportOptions.XHTTPOptions.Path == "" {
 				transportOptions.XHTTPOptions.Path = path
 			}

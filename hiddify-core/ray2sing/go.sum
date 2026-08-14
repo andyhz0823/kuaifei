@@ -265,6 +265,8 @@ github.com/mroth/weightedrand v1.0.0 h1:V8JeHChvl2MP1sAoXq4brElOcza+jxLkRuwvtQu8
 github.com/mroth/weightedrand v1.0.0/go.mod h1:3p2SIcC8al1YMzGhAIoXD+r9olo/g/cdJgAD905gyNE=
 github.com/net2share/vaydns v0.2.5 h1:NPok2sOT+R37yVO79JqwZLfBBoAftyx++xtDQXRKQpA=
 github.com/net2share/vaydns v0.2.5/go.mod h1:+8kEfQsZJn7/4aIppVekrSuqhrKjGBIgnacTJkdAlS8=
+github.com/net2share/vaydns v0.2.6 h1:g9fOCWZMVHJqgc6TIEzubiLUvp+qsD0iGrqmYT0EANU=
+github.com/net2share/vaydns v0.2.6/go.mod h1:+8kEfQsZJn7/4aIppVekrSuqhrKjGBIgnacTJkdAlS8=
 github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 h1:zYyBkD/k9seD2A7fsi6Oo2LfFZAehjjQMERAvZLEDnQ=
 github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646/go.mod h1:jpp1/29i3P1S/RLdc7JQKbRpFeM1dOBd8T9ki5s+AY8=
 github.com/onsi/ginkgo v1.16.5 h1:8xi0RTUf59SOSfEtZMvwTvXYMzG4gV23XVHOZiXNtnE=

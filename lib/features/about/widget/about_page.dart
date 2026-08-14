@@ -42,7 +42,7 @@ class AboutPage extends HookConsumerWidget {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  '\u8b66\u544a\uff1a\u4e25\u7981\u89c2\u770b\u3001\u53d1\u5e03\u6d89\u653f\u53ca\u4e0d\u826f\u5185\u5bb9\uff0c\u5929\u7f51\u6062\u590d\u758f\u800c\u4e0d\u6f0f\u3002',
+                  '\u8b66\u544a\uff1a\u4e25\u7981\u89c2\u770b\u3001\u53d1\u5e03\u6d89\u653f\u53ca\u4e0d\u826f\u5185\u5bb9\uff0c\u6cd5\u7f51\u6062\u6062\uff0c\u758f\u800c\u4e0d\u6f0f\u3002',
                   textAlign: TextAlign.justify,
                   style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.red),
                 ),
@@ -63,7 +63,9 @@ class AboutPage extends HookConsumerWidget {
                   onPressed: checkingUpdate
                       ? null
                       : () async {
-                          final result = await ref.read(appUpdateNotifierProvider.notifier).check();
+                          final result = await ref
+                              .read(appUpdateNotifierProvider.notifier)
+                              .check(respectIgnoredRelease: false);
                           if (!context.mounted) return;
 
                           switch (result) {

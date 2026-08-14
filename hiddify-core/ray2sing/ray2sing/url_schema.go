@@ -21,7 +21,7 @@ type UrlSchema struct {
 
 func (u UrlSchema) GetServerOption() T.ServerOptions {
 	return T.ServerOptions{
-		Server:     u.Hostname,
+		Server:     normalizeConnectionHost(u.Hostname),
 		ServerPort: u.Port,
 	}
 }
@@ -42,7 +42,7 @@ func ParseUrl(inputURL string, defaultPort uint16) (*UrlSchema, error) {
 		Scheme:   parsedURL.Scheme,
 		Username: parsedURL.User.Username(),
 		Password: getPassword(parsedURL),
-		Hostname: parsedURL.Hostname(),
+		Hostname: normalizeConnectionHost(parsedURL.Hostname()),
 		Port:     port,
 		Name:     parsedURL.Fragment,
 		Params:   make(map[string]string),

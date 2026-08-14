@@ -10,8 +10,10 @@ abstract class Constants {
   // Runtime distribution is served by xz.kuaity.top. GitHub remains the source and release backup.
   static const distributionBaseUrl = "https://xz.kuaity.top";
   static const purchaseUrl = "$distributionBaseUrl/";
-  static const originDnsUrl = "$distributionBaseUrl/origin-dns.json";
+  static const bootstrapUrl = "$distributionBaseUrl/api/v1/guest/client/bootstrap";
+  static const originDnsUrl = "$distributionBaseUrl/api/v1/guest/client/origin-dns";
   static const updateManifestUrl = "$distributionBaseUrl/Downloads/latest.json";
+  static const windowsUpdateManifestUrl = "$distributionBaseUrl/Downloads/latest-windows.json";
   static const appCastUrl = "$distributionBaseUrl/Downloads/appcast.xml";
   static const telegramChannelUrl = "https://t.me/hiddify";
   static const privacyPolicyUrl = "https://hiddify.com/privacy-policy/";

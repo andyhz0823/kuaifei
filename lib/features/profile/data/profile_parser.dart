@@ -9,7 +9,6 @@ import 'package:hiddify/core/http_client/dio_http_client.dart';
 import 'package:hiddify/features/profile/data/profile_data_mapper.dart';
 import 'package:hiddify/features/profile/model/profile_entity.dart';
 import 'package:hiddify/features/profile/model/profile_failure.dart';
-import 'package:hiddify/features/settings/data/config_option_repository.dart';
 import 'package:hiddify/singbox/model/singbox_proxy_type.dart';
 import 'package:hiddify/utils/utils.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -154,9 +153,7 @@ class ProfileParser {
           url.trim(),
           tempFilePath,
           cancelToken: cancelToken,
-          userAgent: _ref.read(ConfigOptions.useXrayCoreWhenPossible)
-              ? _httpClient.userAgent.replaceAll("HiddifyNext", "HiddifyNextX")
-              : null,
+          userAgent: _safeSubscriptionUserAgent(_httpClient.userAgent),
         )
         .catchError((err) {
           if (CancelToken.isCancel(err as DioException)) {
@@ -234,9 +231,7 @@ class ProfileParser {
             line,
             tmpPath,
             cancelToken: cancelToken,
-            userAgent: ref.read(ConfigOptions.useXrayCoreWhenPossible)
-                ? httpClient.userAgent.replaceAll('HiddifyNext', 'HiddifyNextX')
-                : null,
+            userAgent: _safeSubscriptionUserAgent(httpClient.userAgent),
           );
 
           results[currentIndex] = (await File(tmpPath).readAsString()).trim();
@@ -256,6 +251,21 @@ class ProfileParser {
       final newContent = results.join("\n");
       await File(tempFilePath).writeAsString(newContent);
     }
+  }
+
+  static String _safeSubscriptionUserAgent(String userAgent) {
+    final trimmed = userAgent.trim();
+    if (trimmed.isEmpty) return 'hiddify/4.1.0';
+
+    // Xboard selects the subscription generator from either ?flag= or the
+    // User-Agent. The default app UA intentionally advertises several client
+    // families ("like ClashMeta v2ray sing-box"). That is good for generic
+    // compatibility, but Xboard may choose ClashMeta before SingBox and omit the
+    // native sing-box ECH object. For Kuaifei's own profile import we request
+    // the Hiddify/SingBox generator explicitly while preserving the app version.
+    final versionMatch = RegExp(r'/(v?\d+(?:\.\d+){0,3})').firstMatch(trimmed);
+    final version = versionMatch?.group(1)?.replaceFirst(RegExp('^v', caseSensitive: false), '') ?? '4.1.0';
+    return 'hiddify/$version';
   }
 
   static Either<ProfileFailure, Map<String, dynamic>> populateHeaders({

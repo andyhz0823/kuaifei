@@ -103,7 +103,7 @@ require (
 	github.com/miekg/dns v1.1.72 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/mroth/weightedrand v1.0.0 // indirect
-	github.com/net2share/vaydns v0.2.5 // indirect
+	github.com/net2share/vaydns v0.2.6 // indirect
 	github.com/openai/openai-go/v3 v3.15.0 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
