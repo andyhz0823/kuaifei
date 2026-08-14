@@ -94,7 +94,7 @@ install(CODE "
   file(REMOVE \"${CMAKE_INSTALL_PREFIX}/HiddifyCli.exe\")
   " COMPONENT Runtime)
 
-install(FILES "../hiddify-core/bin/KuaifeiCli.exe" DESTINATION "${CMAKE_INSTALL_PREFIX}"
+install(FILES "../hiddify-core/bin/HiddifyCli.exe" DESTINATION "${CMAKE_INSTALL_PREFIX}"
 COMPONENT Runtime RENAME KuaifeiCli.exe)
 
 
