@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/drift.dart';
-import 'package:fpdart/fpdart.dart';
 import 'package:hiddify/core/app_info/app_info_provider.dart';
 import 'package:hiddify/core/db/db.dart';
 import 'package:hiddify/core/db/provider/db_providers.dart';
@@ -366,34 +365,32 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     final desiredUrls = profiles.map((profile) => profile.subscribeUrl).where((url) => url.isNotEmpty).toSet();
 
     loggy.info('Auth: importing ${profiles.length} subscriptions as separate profiles');
+    // Package subscriptions must not be serial: one unreachable endpoint used
+    // to delay every later package by the full HTTP retry budget. Each profile
+    // has its own URL/name and ProfileRepository serializes database writes, so
+    // concurrent downloads allow available packages to appear immediately.
+    final outcomes = await Future.wait(
+      profiles.where((profile) => profile.subscribeUrl.isNotEmpty).map(
+        (profile) => _syncSubscriptionProfile(repo, profile),
+      ),
+    );
+
     var successCount = 0;
     final successfulUrls = <String>{};
     Object? lastFailure;
-    for (final profile in profiles) {
-      final url = profile.subscribeUrl;
-      if (url.isEmpty) continue;
-
+    for (final outcome in outcomes) {
+      final profile = outcome.profile;
       final profileName = (profile.name != null && profile.name!.isNotEmpty) ? profile.name! : null;
-
-      try {
-        final result = await repo
-            .upsertRemote(url, userOverride: profileName != null ? UserOverride(name: profileName) : null)
-            .run();
-
-        switch (result) {
-          case Left(value: final failure):
-            lastFailure = failure;
-            loggy.warning('Auth: failed to sync subscription from $url', failure);
-          case Right():
-            successCount++;
-            successfulUrls.add(url);
-            await _applySubscriptionInfo(profile);
-            loggy.info('Auth: synced profile "$profileName" from $url');
-        }
-      } catch (e, st) {
-        lastFailure = e;
-        loggy.warning('Auth: failed to process subscription $url', e, st);
+      if (!outcome.success) {
+        lastFailure = outcome.failure;
+        loggy.warning('Auth: failed to sync subscription from ${profile.subscribeUrl}', outcome.failure);
+        continue;
       }
+
+      successCount++;
+      successfulUrls.add(profile.subscribeUrl);
+      await _applySubscriptionInfo(profile);
+      loggy.info('Auth: synced profile "$profileName" from ${profile.subscribeUrl}');
     }
 
     if (throwOnTotalFailure && successCount == 0) {
@@ -417,6 +414,25 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     loggy.info('Auth: successfully synced $successCount subscription profiles');
   }
 
+  Future<({XboardSubscriptionProfile profile, bool success, Object? failure})> _syncSubscriptionProfile(
+    ProfileRepository repo,
+    XboardSubscriptionProfile profile,
+  ) async {
+    final url = profile.subscribeUrl;
+    final profileName = (profile.name != null && profile.name!.isNotEmpty) ? profile.name! : null;
+    try {
+      final result = await repo
+          .upsertRemote(url, userOverride: profileName != null ? UserOverride(name: profileName) : null)
+          .run();
+      return result.match(
+        (failure) => (profile: profile, success: false, failure: failure),
+        (_) => (profile: profile, success: true, failure: null),
+      );
+    } catch (error, stackTrace) {
+      loggy.warning('Auth: failed to process subscription $url', error, stackTrace);
+      return (profile: profile, success: false, failure: error);
+    }
+  }
   Future<void> _normalizeSyncedProfileNames(
     Db db,
     List<XboardSubscriptionProfile> profiles,

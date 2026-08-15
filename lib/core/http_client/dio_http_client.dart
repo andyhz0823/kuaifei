@@ -13,12 +13,18 @@ class DioHttpClient with InfraLogger {
   /// Mapped addresses are best effort; stale Cloudflare IPs must not block sync.
   static const mappedConnectionBudget = Duration(seconds: 2);
   static const mappedHostFailureCooldown = Duration(minutes: 15);
+  // A failed mapped-origin probe must not make each subscription wait through
+  // the normal retry chain. Try the public route directly first, then the
+  // local proxy once, each with a bounded budget.
+  static const subscriptionFallbackBudget = Duration(seconds: 8);
 
   static final Map<String, DateTime> _mappedHostUnavailableUntil = {};
   static final Set<String> _mappedHostsInFlight = {};
 
   final Map<String, Dio> _dio = {};
   late final Dio _mappedDio;
+  late final Dio _fastDirectDio;
+  late final Dio _fastProxyDio;
   late final LoginDohResolver _dohResolver;
 
   DioHttpClient({
@@ -61,6 +67,15 @@ class DioHttpClient with InfraLogger {
         },
       );
     }
+
+    _fastDirectDio = _createFastTransportDio(
+      mode: 'direct',
+      timeout: subscriptionFallbackBudget,
+    );
+    _fastProxyDio = _createFastTransportDio(
+      mode: 'proxy',
+      timeout: subscriptionFallbackBudget,
+    );
 
     _mappedDio = Dio(
       BaseOptions(
@@ -141,7 +156,47 @@ class DioHttpClient with InfraLogger {
       request: () => _mappedDio.download(url, path, cancelToken: cancelToken, options: options),
     );
     if (mappedResponse != null) return mappedResponse;
-    return _dio[await _transportMode(proxyOnly)]!.download(url, path, cancelToken: cancelToken, options: options);
+
+    // Do not fall through to the normal Dio instance here. It has a retry
+    // interceptor intended for ordinary API calls, which made one failed
+    // mapped probe hold the login import for roughly 40 seconds per package.
+    // Subscription URLs are already authenticated and idempotent, so a direct
+    // public request followed by one proxy request is safer and much faster.
+    if (proxyOnly) {
+      return _fastProxyDio.download(url, path, cancelToken: cancelToken, options: options);
+    }
+
+    try {
+      loggy.debug('Subscription download fallback: trying direct transport for $url');
+      return await _fastDirectDio.download(url, path, cancelToken: cancelToken, options: options);
+    } catch (error, stackTrace) {
+      if (_isCancelled(error)) rethrow;
+      loggy.warning('Direct subscription download failed; trying proxy transport for $url', error, stackTrace);
+      if (!await isPortOpen('127.0.0.1', port, timeout: const Duration(seconds: 1))) {
+        rethrow;
+      }
+      return _fastProxyDio.download(url, path, cancelToken: cancelToken, options: options);
+    }
+  }
+
+  Dio _createFastTransportDio({required String mode, required Duration timeout}) {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: timeout,
+        sendTimeout: timeout,
+        receiveTimeout: timeout,
+        headers: {'User-Agent': userAgent},
+      ),
+    );
+    dio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final client = HttpClient(context: SecurityContext(withTrustedRoots: true));
+        client.connectionTimeout = timeout;
+        client.findProxy = (_) => mode == 'proxy' ? 'PROXY localhost:$port' : 'DIRECT';
+        return client;
+      },
+    );
+    return dio;
   }
 
   Future<String> _transportMode(bool proxyOnly) async {
