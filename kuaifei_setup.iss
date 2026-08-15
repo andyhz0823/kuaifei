@@ -1,6 +1,6 @@
 [Setup]
 AppId={{6L903538-42B1-4596-G479-BJ779F21A65D}}
-AppVersion=4.1.13
+AppVersion=4.1.14
 AppName=Kuaifei
 AppPublisher=Kuaifei
 AppPublisherURL=https://github.com/andyhz0823/Xboard
@@ -8,8 +8,8 @@ AppSupportURL=https://github.com/andyhz0823/Xboard
 AppUpdatesURL=https://xz.kuaity.top/Downloads/
 DefaultDirName={autopf64}\Kuaifei
 DisableProgramGroupPage=yes
-OutputDir=dist\4.1.13+40115
-OutputBaseFilename=kuaifei-4.1.13
+OutputDir=dist\4.1.14+40116
+OutputBaseFilename=kuaifei-4.1.14
 Compression=lzma
 SolidCompression=yes
 SetupIconFile=windows\runner\resources\app_icon.ico
@@ -18,12 +18,12 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 CloseApplications=force
-VersionInfoVersion=4.1.13.0
-VersionInfoProductVersion=4.1.13.0
+VersionInfoVersion=4.1.14.0
+VersionInfoProductVersion=4.1.14.0
 VersionInfoDescription=Kuaifei
 VersionInfoProductName=Kuaifei
 VersionInfoCompany=Kuaifei
-VersionInfoOriginalFileName=kuaifei-4.1.13.exe
+VersionInfoOriginalFileName=kuaifei-4.1.14.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
