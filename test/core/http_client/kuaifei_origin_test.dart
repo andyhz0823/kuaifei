@@ -66,18 +66,21 @@ void main() {
     final config = OriginDnsConfig.fromJson({
       'source': 'kuaifei.top',
       'revision': 45,
-      'records': {'panel.example.com': ['198.51.100.45']},
+      'records': {
+        'panel.example.com': ['198.51.100.45'],
+      },
       'auth_endpoints': <dynamic>[
         {
           'id': 'primary',
           'url': 'https://kuaifei.top',
-          'capabilities': <dynamic>['api', 'API', 7, null, ''],
+          'capabilities': <dynamic>['api', 'API', 'subscription', 7, null, ''],
         },
       ],
     });
 
     expect(config.authEndpoints, hasLength(1));
-    expect(config.authEndpoints.single.capabilities, ['api']);
+    expect(config.authEndpoints.single.capabilities, ['api', 'subscription']);
+    expect(config.authEndpoints.single.supportsSubscription, isTrue);
   });
 
   test('does not mark business panel domains as built-in relay-first targets', () {

@@ -21,6 +21,7 @@ class ClientAuthEndpoint {
   final String? routeId;
 
   bool get supportsApi => capabilities.contains('api');
+  bool get supportsSubscription => capabilities.contains('subscription');
 
   factory ClientAuthEndpoint.fromJson(dynamic value) {
     if (value is String) {

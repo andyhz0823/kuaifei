@@ -17,6 +17,7 @@ class DioHttpClient with InfraLogger {
   // the normal retry chain. Try the public route directly first, then the
   // local proxy once, each with a bounded budget.
   static const subscriptionFallbackBudget = Duration(seconds: 8);
+  static const subscriptionEndpointProbeBudget = Duration(seconds: 6);
 
   static final Map<String, DateTime> _mappedHostUnavailableUntil = {};
   static final Set<String> _mappedHostsInFlight = {};
@@ -25,7 +26,10 @@ class DioHttpClient with InfraLogger {
   late final Dio _mappedDio;
   late final Dio _fastDirectDio;
   late final Dio _fastProxyDio;
+  late final Dio _subscriptionProbeDio;
   late final LoginDohResolver _dohResolver;
+  String? _subscriptionFallbackBaseUrl;
+  Future<String?>? _subscriptionEndpointDiscovery;
 
   DioHttpClient({
     required Duration timeout,
@@ -75,6 +79,10 @@ class DioHttpClient with InfraLogger {
     _fastProxyDio = _createFastTransportDio(
       mode: 'proxy',
       timeout: subscriptionFallbackBudget,
+    );
+    _subscriptionProbeDio = _createFastTransportDio(
+      mode: 'direct',
+      timeout: subscriptionEndpointProbeBudget,
     );
 
     _mappedDio = Dio(
@@ -166,17 +174,148 @@ class DioHttpClient with InfraLogger {
       return _fastProxyDio.download(url, path, cancelToken: cancelToken, options: options);
     }
 
+    Object? lastError;
+    StackTrace? lastStackTrace;
     try {
-      loggy.debug('Subscription download fallback: trying direct transport for $url');
+      loggy.debug('Subscription download fallback: trying direct transport for ${Uri.tryParse(url)?.host ?? 'unknown host'}');
       return await _fastDirectDio.download(url, path, cancelToken: cancelToken, options: options);
     } catch (error, stackTrace) {
       if (_isCancelled(error)) rethrow;
-      loggy.warning('Direct subscription download failed; trying proxy transport for $url', error, stackTrace);
-      if (!await isPortOpen('127.0.0.1', port, timeout: const Duration(seconds: 1))) {
-        rethrow;
-      }
-      return _fastProxyDio.download(url, path, cancelToken: cancelToken, options: options);
+      lastError = error;
+      lastStackTrace = stackTrace;
+      loggy.warning('Direct subscription download failed for ${Uri.tryParse(url)?.host ?? 'unknown host'}', error, stackTrace);
     }
+
+    if (port > 0 && await isPortOpen('127.0.0.1', port, timeout: const Duration(seconds: 1))) {
+      try {
+        loggy.debug('Subscription download fallback: trying local proxy transport');
+        return await _fastProxyDio.download(url, path, cancelToken: cancelToken, options: options);
+      } catch (error, stackTrace) {
+        if (_isCancelled(error)) rethrow;
+        lastError = error;
+        lastStackTrace = stackTrace;
+        loggy.warning('Local proxy subscription download failed; trying signed endpoint pool', error, stackTrace);
+      }
+    }
+
+    final fallbackUrl = await _resolveSubscriptionFallbackUrl(url, options: options);
+    if (fallbackUrl == null) {
+      Error.throwWithStackTrace(lastError, lastStackTrace);
+    }
+
+    try {
+      final fallbackHost = Uri.parse(fallbackUrl).host;
+      loggy.info('Subscription download fallback: using signed endpoint $fallbackHost');
+      return await _fastDirectDio.download(fallbackUrl, path, cancelToken: cancelToken, options: options);
+    } catch (error, stackTrace) {
+      if (_isCancelled(error)) rethrow;
+      final failedBase = _subscriptionFallbackBaseUrl;
+      if (failedBase != null && fallbackUrl.startsWith(failedBase)) {
+        _subscriptionFallbackBaseUrl = null;
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  Future<String?> _resolveSubscriptionFallbackUrl(String url, {required Options options}) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.isScheme('https') || uri.host.isEmpty) return null;
+
+    final endpoints = KuaifeiOrigin.config.authEndpoints.where((endpoint) => endpoint.supportsSubscription).toList();
+    final knownHosts = endpoints.map((endpoint) => Uri.tryParse(endpoint.url)?.host).whereType<String>().toSet();
+    if (!knownHosts.contains(uri.host)) return null;
+
+    final cachedBase = _subscriptionFallbackBaseUrl;
+    if (cachedBase != null && Uri.tryParse(cachedBase)?.host != uri.host) {
+      return _replaceSubscriptionBase(uri, cachedBase).toString();
+    }
+
+    final currentDiscovery = _subscriptionEndpointDiscovery;
+    if (currentDiscovery != null) {
+      final base = await currentDiscovery;
+      return base == null ? null : _replaceSubscriptionBase(uri, base).toString();
+    }
+
+    final discovery = _discoverSubscriptionEndpoint(uri, endpoints, options);
+    _subscriptionEndpointDiscovery = discovery;
+    try {
+      final base = await discovery;
+      if (base == null) return null;
+      _subscriptionFallbackBaseUrl = base;
+      return _replaceSubscriptionBase(uri, base).toString();
+    } finally {
+      if (identical(_subscriptionEndpointDiscovery, discovery)) {
+        _subscriptionEndpointDiscovery = null;
+      }
+    }
+  }
+
+  Future<String?> _discoverSubscriptionEndpoint(
+    Uri original,
+    List<ClientAuthEndpoint> endpoints,
+    Options options,
+  ) async {
+    final candidates = <String>[];
+    final seenHosts = <String>{original.host};
+    for (final endpoint in endpoints) {
+      final endpointUri = Uri.tryParse(endpoint.url);
+      if (endpointUri == null || !endpointUri.isScheme('https') || !seenHosts.add(endpointUri.host)) continue;
+      candidates.add(endpoint.url);
+    }
+    if (candidates.isEmpty) return null;
+
+    final completer = Completer<String?>();
+    final cancelTokens = <CancelToken>[];
+    var remaining = candidates.length;
+    for (final base in candidates) {
+      final candidateUri = _replaceSubscriptionBase(original, base);
+      final token = CancelToken();
+      cancelTokens.add(token);
+      unawaited(() async {
+        try {
+          await _subscriptionProbeDio.get<List<int>>(
+            candidateUri.toString(),
+            cancelToken: token,
+            options: options.copyWith(responseType: ResponseType.bytes),
+          );
+          if (!completer.isCompleted) {
+            completer.complete(base);
+            for (final other in cancelTokens) {
+              if (!identical(other, token) && !other.isCancelled) other.cancel('subscription endpoint selected');
+            }
+          }
+        } catch (error, stackTrace) {
+          if (!_isCancelled(error)) {
+            loggy.debug('Subscription endpoint probe failed for ${candidateUri.host}', error, stackTrace);
+          }
+        } finally {
+          remaining -= 1;
+          if (remaining == 0 && !completer.isCompleted) completer.complete(null);
+        }
+      }());
+    }
+    return completer.future.timeout(
+      subscriptionEndpointProbeBudget + const Duration(seconds: 1),
+      onTimeout: () {
+        for (final token in cancelTokens) {
+          if (!token.isCancelled) token.cancel('subscription endpoint discovery timed out');
+        }
+        return null;
+      },
+    );
+  }
+
+  Uri _replaceSubscriptionBase(Uri original, String base) {
+    final endpoint = Uri.parse(base);
+    final prefix = endpoint.path.replaceFirst(RegExp(r'/+$'), '');
+    final suffix = original.path.startsWith('/') ? original.path : '/${original.path}';
+    return Uri(
+      scheme: endpoint.scheme,
+      host: endpoint.host,
+      port: endpoint.hasPort ? endpoint.port : null,
+      path: '$prefix$suffix',
+      query: original.hasQuery ? original.query : null,
+    );
   }
 
   Dio _createFastTransportDio({required String mode, required Duration timeout}) {
