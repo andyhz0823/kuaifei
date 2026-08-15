@@ -47,7 +47,11 @@ class DioHttpClient with InfraLogger {
       );
       _dio[mode]!.httpClientAdapter = IOHttpClientAdapter(
         createHttpClient: () {
-          final client = HttpClient(context: KuaifeiOrigin.securityContext);
+          // Normal requests use the public certificate chain. The origin-CA
+          // context is reserved for mapped connections to the VPS origin;
+          // using it for Cloudflare Worker/public subscription URLs can make
+          // the server terminate the TLS handshake before the normal fallback.
+          final client = HttpClient(context: SecurityContext(withTrustedRoots: true));
           client.findProxy = (url) {
             if (mode == 'proxy') return 'PROXY localhost:$port';
             if (mode == 'direct') return 'DIRECT';
