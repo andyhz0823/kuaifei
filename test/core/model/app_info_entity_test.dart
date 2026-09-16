@@ -6,14 +6,14 @@ void main() {
   test('uses one display value for the brand and package version', () {
     const appInfo = AppInfoEntity(
       name: 'tkya',
-      version: '4.1.6',
-      buildNumber: '40106',
+      version: '1.0.1',
+      buildNumber: '10001',
       release: Release.general,
       operatingSystem: 'windows',
       operatingSystemVersion: '11',
       environment: Environment.prod,
     );
 
-    expect(appInfo.displayNameWithVersion, 'Tkya v4.1.6');
+    expect(appInfo.displayNameWithVersion, 'Tkya v1.0.1');
   });
 }

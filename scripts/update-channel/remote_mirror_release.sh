@@ -5,9 +5,9 @@
 #   remote_mirror_release.sh <tag> <dest> <download_base> <asset> [asset...]
 #
 # 例：
-#   remote_mirror_release.sh v4.1.14 /www/wwwroot/kuaifei.top/Downloads \
-#     https://github.com/o/r/releases/download/v4.1.14 \
-#     Tkya-v4.1.14-android-arm64-v8a.apk ... SHA256SUMS.txt
+#   remote_mirror_release.sh v1.0.1 /www/wwwroot/kuaifei.top/Downloads \
+#     https://github.com/o/r/releases/download/v1.0.1 \
+#     Tkya-v1.0.1-android-arm64-v8a.apk ... SHA256SUMS.txt
 #
 # 由同目录的 deploy-update-channel.ps1 通过 ssh 上传到服务器后调用，一般不单独运行。
 set -euo pipefail
@@ -23,7 +23,7 @@ if [[ $# -eq 0 ]]; then
 fi
 ASSETS=("$@")
 
-# 只接受形如 v4.1.14 的标签，避免拼进 URL/路径后出现问题
+# 只接受形如 v1.0.1 的标签，避免拼进 URL/路径后出现问题
 if [[ ! "$TAG" =~ ^v[0-9]+(\.[0-9]+)*$ ]]; then
   echo "refusing to run with unexpected tag: $TAG" >&2
   exit 1
