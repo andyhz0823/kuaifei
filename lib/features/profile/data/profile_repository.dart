@@ -131,7 +131,7 @@ class ProfileRepositoryImpl with ExceptionHandler, InfraLogger implements Profil
 
         // Xboard subscription URLs can change when the panel rotates domains,
         // but the purchased package name stays stable. Treat that name as the
-        // identity for Kuaifei multi-package imports so updates replace the
+        // identity for Tkya multi-package imports so updates replace the
         // existing package instead of creating numbered duplicate names.
         final profileName = userOverride?.name?.trim();
         if (profileName != null && profileName.isNotEmpty) {

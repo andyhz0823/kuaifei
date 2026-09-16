@@ -1,15 +1,15 @@
 [Setup]
 AppId={{6L903538-42B1-4596-G479-BJ779F21A65D}}
-AppVersion=4.1.12
-AppName=Kuaifei
-AppPublisher=Kuaifei
+AppVersion=1.0.1
+AppName=Tkya
+AppPublisher=Tkya
 AppPublisherURL=https://github.com/andyhz0823/Xboard
 AppSupportURL=https://github.com/andyhz0823/Xboard
-AppUpdatesURL=https://xz.kuaity.top/Downloads/
-DefaultDirName={autopf64}\Kuaifei
+AppUpdatesURL=https://xz.tkya.cc.cd/Downloads/
+DefaultDirName={autopf64}\Tkya
 DisableProgramGroupPage=yes
-OutputDir=dist\4.1.12+40112
-OutputBaseFilename=kuaifei-4.1.12
+OutputDir=dist\1.0.1+10001
+OutputBaseFilename=tkya-1.0.1
 Compression=lzma
 SolidCompression=yes
 SetupIconFile=windows\runner\resources\app_icon.ico
@@ -18,12 +18,12 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 CloseApplications=force
-VersionInfoVersion=4.1.12.0
-VersionInfoProductVersion=4.1.12.0
-VersionInfoDescription=Kuaifei
-VersionInfoProductName=Kuaifei
-VersionInfoCompany=Kuaifei
-VersionInfoOriginalFileName=kuaifei-4.1.12.exe
+VersionInfoVersion=1.0.1.0
+VersionInfoProductVersion=1.0.1.0
+VersionInfoDescription=Tkya
+VersionInfoProductName=Tkya
+VersionInfoCompany=Tkya
+VersionInfoOriginalFileName=tkya-1.0.1.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -36,15 +36,15 @@ Name: "launchAtStartup"; Description: "Auto-start at login"; GroupDescription: "
 Source: "build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\Kuaifei"; Filename: "{app}\kuaifei.exe"
-Name: "{autodesktop}\Kuaifei"; Filename: "{app}\kuaifei.exe"; Tasks: desktopicon
-Name: "{userstartup}\Kuaifei"; Filename: "{app}\kuaifei.exe"; WorkingDir: "{app}"; Tasks: launchAtStartup
+Name: "{autoprograms}\Tkya"; Filename: "{app}\tkya.exe"
+Name: "{autodesktop}\Tkya"; Filename: "{app}\tkya.exe"; Tasks: desktopicon
+Name: "{userstartup}\Tkya"; Filename: "{app}\tkya.exe"; WorkingDir: "{app}"; Tasks: launchAtStartup
 
 [Run]
-Filename: "{app}\kuaifei.exe"; Description: "Launch kuaifei"; Flags: runascurrentuser nowait postinstall skipifsilent
+Filename: "{app}\tkya.exe"; Description: "Launch tkya"; Flags: runascurrentuser nowait postinstall skipifsilent
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{userappdata}\kuaifei"
+Type: filesandordirs; Name: "{userappdata}\tkya"
 
 [Code]
 function InitializeSetup(): Boolean;
@@ -52,7 +52,7 @@ var
   ResultCode: Integer;
 begin
   Exec('taskkill', '/F /IM hiddify.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('net', 'stop "kuaifeiTunnelService"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('sc.exe', 'delete "kuaifeiTunnelService"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('net', 'stop "tkyaTunnelService"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('sc.exe', 'delete "tkyaTunnelService"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := True;
 end;

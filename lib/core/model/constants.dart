@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 abstract class Constants {
-  static const appName = "Kuaifei";
+  static const appName = "Tkya";
   static const githubUrl = "https://github.com/andyhz0823/Xboard";
   static const licenseUrl = "https://github.com/andyhz0823/Xboard";
   static const githubReleasesApiUrl = "https://api.github.com/repos/andyhz0823/Xboard/releases";
   static const githubLatestReleaseUrl = "https://github.com/andyhz0823/Xboard/releases/latest";
-  // Runtime distribution is served by xz.kuaity.top. GitHub remains the source and release backup.
-  static const distributionBaseUrl = "https://xz.kuaity.top";
+  // Runtime distribution is served by xz.tkya.cc.cd. GitHub remains the source and release backup.
+  static const distributionBaseUrl = "https://xz.tkya.cc.cd";
   static const purchaseUrl = "$distributionBaseUrl/";
   static const bootstrapUrl = "$distributionBaseUrl/api/v1/guest/client/bootstrap";
   static const originDnsUrl = "$distributionBaseUrl/api/v1/guest/client/origin-dns";

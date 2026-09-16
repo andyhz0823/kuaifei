@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:dio_smart_retry/dio_smart_retry.dart';
-import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/http_client/tkya_origin.dart';
 import 'package:hiddify/features/auth/data/login_doh_resolver.dart';
 import 'package:hiddify/utils/custom_loggers.dart';
 
@@ -95,7 +95,7 @@ class DioHttpClient with InfraLogger {
     );
     _mappedDio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
-        final client = HttpClient(context: KuaifeiOrigin.securityContext)
+        final client = HttpClient(context: TkyaOrigin.securityContext)
           ..connectionTimeout = mappedConnectionBudget
           ..findProxy = (_) => 'DIRECT';
         client.connectionFactory = (uri, proxyHost, proxyPort) async {
@@ -221,7 +221,7 @@ class DioHttpClient with InfraLogger {
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.isScheme('https') || uri.host.isEmpty) return null;
 
-    final endpoints = KuaifeiOrigin.config.authEndpoints.where((endpoint) => endpoint.supportsSubscription).toList();
+    final endpoints = TkyaOrigin.config.authEndpoints.where((endpoint) => endpoint.supportsSubscription).toList();
     final knownHosts = endpoints.map((endpoint) => Uri.tryParse(endpoint.url)?.host).whereType<String>().toSet();
     if (!knownHosts.contains(uri.host)) return null;
 
@@ -426,7 +426,7 @@ class DioHttpClient with InfraLogger {
 
   bool _hasMappedEndpoint(String url) {
     final host = _hostForUrl(url);
-    return host != null && KuaifeiOrigin.connectionAddressesForHost(host).isNotEmpty;
+    return host != null && TkyaOrigin.connectionAddressesForHost(host).isNotEmpty;
   }
 
   bool _canDohBootstrap(String url) {
@@ -436,7 +436,7 @@ class DioHttpClient with InfraLogger {
   }
 
   Future<Socket> _connectMapped(Uri uri) async {
-    final configured = KuaifeiOrigin.connectionAddressesForHost(
+    final configured = TkyaOrigin.connectionAddressesForHost(
       uri.host,
     ).map(InternetAddress.new).toList(growable: false);
     final addresses = configured.isNotEmpty ? configured : await _resolveDohAddresses(uri.host);
@@ -481,6 +481,6 @@ class DioHttpClient with InfraLogger {
 
   Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {
     if (!uri.isScheme('https')) return Future.value(socket);
-    return SecureSocket.secure(socket, host: uri.host, context: KuaifeiOrigin.securityContext);
+    return SecureSocket.secure(socket, host: uri.host, context: TkyaOrigin.securityContext);
   }
 }

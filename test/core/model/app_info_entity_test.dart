@@ -5,7 +5,7 @@ import 'package:hiddify/core/model/environment.dart';
 void main() {
   test('uses one display value for the brand and package version', () {
     const appInfo = AppInfoEntity(
-      name: 'kuaifei',
+      name: 'tkya',
       version: '4.1.6',
       buildNumber: '40106',
       release: Release.general,
@@ -14,6 +14,6 @@ void main() {
       environment: Environment.prod,
     );
 
-    expect(appInfo.displayNameWithVersion, 'Kuaifei v4.1.6');
+    expect(appInfo.displayNameWithVersion, 'Tkya v4.1.6');
   });
 }

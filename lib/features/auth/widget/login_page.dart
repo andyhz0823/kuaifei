@@ -65,7 +65,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   Icon(Icons.vpn_lock_rounded, size: 64, color: theme.colorScheme.primary),
                   const SizedBox(height: 8),
                   Text(
-                    'kuaifei',
+                    'Tkya',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
                   ),
@@ -81,8 +81,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     keyboardType: TextInputType.url,
                     decoration: const InputDecoration(
                       labelText: '面板地址',
-                      hintText: 'https://tttt.kuaifei.top',
-                      helperText: '如果登录不上，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top',
+                      hintText: 'https://tttt.tkya.cc.cd',
+                      helperText: '如果登录不上，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.tkya.cc.cd',
                       helperMaxLines: 2,
                       prefixIcon: Icon(Icons.dns_outlined),
                       border: OutlineInputBorder(),
@@ -196,13 +196,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       return '网络连接失败，请检查面板地址或网络设置。';
     }
     if (error.contains('登录失败，请修改面板域名前缀')) {
-      return '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top';
+      return '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.tkya.cc.cd';
     }
     if (error.contains('DioException')) {
-      return '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top';
+      return '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.tkya.cc.cd';
     }
     if (error.contains('DoH failed')) {
-      return 'DNS解析失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top';
+      return 'DNS解析失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.tkya.cc.cd';
     }
     if (error.contains('XMLHttpRequest')) {
       return '网络请求被拦截，请检查网络环境或更换面板地址。';

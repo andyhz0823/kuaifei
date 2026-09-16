@@ -1,4 +1,4 @@
-name: Kuaifei Release
+name: Tkya Release
 
 on:
   push:
@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag, for example v4.1.11
+        description: Existing release tag, for example v1.0.1
         required: true
-        default: v4.1.11
+        default: v1.0.1
         type: string
       publish:
         description: Publish a GitHub Release with Sigstore keyless signatures
@@ -25,7 +25,7 @@ permissions:
   attestations: write
 
 concurrency:
-  group: kuaifei-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  group: tkya-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -74,7 +74,7 @@ jobs:
 
           # Android's package signature is separate from Sigstore. Keep the
           # stable keystore optional for CI evaluation, but recommend it for
-          # install-over-update compatibility with previous Kuaifei releases.
+          # install-over-update compatibility with previous Tkya releases.
           if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEYSTORE_PASSWORD" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_KEY_PASSWORD" ]]; then
             android_ready=true
           fi
@@ -146,8 +146,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "out/Kuaifei-v${VERSION}-android-arm64-v8a.apk"
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "out/Kuaifei-v${VERSION}-android-armeabi-v7a.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "out/Tkya-v${VERSION}-android-arm64-v8a.apk"
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "out/Tkya-v${VERSION}-android-armeabi-v7a.apk"
           if [[ "$ANDROID_SIGNING_READY" != "true" ]]; then
             printf '%s\n' \
               'WARNING: Android APKs use the Gradle debug key because ANDROID_* secrets are not configured.' \
@@ -157,7 +157,7 @@ jobs:
           fi
       - uses: actions/upload-artifact@v6
         with:
-          name: kuaifei-android
+          name: tkya-android
           path: out/
           if-no-files-found: error
           retention-days: 14
@@ -195,23 +195,23 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $out = Join-Path $PWD 'out'
-          $portable = Join-Path $PWD 'portable\Kuaifei'
+          $portable = Join-Path $PWD 'portable\Tkya'
           New-Item -ItemType Directory -Force -Path $out, $portable | Out-Null
           Copy-Item 'build\windows\x64\runner\Release\*' $portable -Recurse -Force
-          Compress-Archive -Path "$portable\*" -DestinationPath "$out\kuaifei-$env:VERSION.zip" -Force
-          & iscc /Qp kuaifei_setup.iss
-          $installer = Get-ChildItem -Path (Join-Path $PWD 'dist') -Filter "kuaifei-$env:VERSION.exe" -Recurse -File | Select-Object -First 1
+          Compress-Archive -Path "$portable\*" -DestinationPath "$out\tkya-$env:VERSION.zip" -Force
+          & iscc /Qp tkya_setup.iss
+          $installer = Get-ChildItem -Path (Join-Path $PWD 'dist') -Filter "tkya-$env:VERSION.exe" -Recurse -File | Select-Object -First 1
           if ($null -eq $installer) {
-            throw "Inno Setup did not produce kuaifei-$env:VERSION.exe under dist"
+            throw "Inno Setup did not produce tkya-$env:VERSION.exe under dist"
           }
-          Copy-Item $installer.FullName "$out\kuaifei-$env:VERSION.exe" -Force
+          Copy-Item $installer.FullName "$out\tkya-$env:VERSION.exe" -Force
           Set-Content -Path "$out\WINDOWS-PLATFORM-SIGNING-WARNING.txt" -Value @'
           WARNING: Windows artifacts are not Authenticode-signed in this open-source workflow.
           Sigstore keyless signatures verify the release artifact and GitHub Actions identity, but do not make Windows Smart App Control trust the binary.
           '@
       - uses: actions/upload-artifact@v6
         with:
-          name: kuaifei-windows
+          name: tkya-windows
           path: out/
           if-no-files-found: error
           retention-days: 14
@@ -223,7 +223,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v7
         with:
-          pattern: kuaifei-*
+          pattern: tkya-*
           merge-multiple: true
           path: out/
       - name: Install Cosign for Sigstore keyless signing
@@ -244,7 +244,7 @@ jobs:
           source_sha=${{ github.sha }}
           release_tag=${{ needs.preflight.outputs.tag }}
           EOF
-          sha256sum Kuaifei-v*.apk kuaifei-*.exe kuaifei-*.zip SIGSTORE-VERIFICATION.txt > SHA256SUMS.txt
+          sha256sum Tkya-v*.apk tkya-*.exe tkya-*.zip SIGSTORE-VERIFICATION.txt > SHA256SUMS.txt
       - name: Sign release artifacts with Sigstore keyless
         shell: bash
         env:
@@ -253,10 +253,10 @@ jobs:
         run: |
           set -euo pipefail
           cd out
-          for file in Kuaifei-v*.apk kuaifei-*.exe kuaifei-*.zip SHA256SUMS.txt SIGSTORE-VERIFICATION.txt; do
+          for file in Tkya-v*.apk tkya-*.exe tkya-*.zip SHA256SUMS.txt SIGSTORE-VERIFICATION.txt; do
             cosign sign-blob --yes --bundle "${file}.sigstore.json" "$file"
           done
-          for file in Kuaifei-v*.apk kuaifei-*.exe kuaifei-*.zip SHA256SUMS.txt SIGSTORE-VERIFICATION.txt; do
+          for file in Tkya-v*.apk tkya-*.exe tkya-*.zip SHA256SUMS.txt SIGSTORE-VERIFICATION.txt; do
             cosign verify-blob \
               --bundle "${file}.sigstore.json" \
               --certificate-identity "$EXPECTED_CERTIFICATE_IDENTITY" \
@@ -267,14 +267,14 @@ jobs:
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
-            out/Kuaifei-v*.apk
-            out/kuaifei-*.exe
-            out/kuaifei-*.zip
+            out/Tkya-v*.apk
+            out/tkya-*.exe
+            out/tkya-*.zip
       - name: Publish signed GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
-          name: Kuaifei ${{ needs.preflight.outputs.version }}
+          name: Tkya ${{ needs.preflight.outputs.version }}
           prerelease: false
           generate_release_notes: true
           files: out/*

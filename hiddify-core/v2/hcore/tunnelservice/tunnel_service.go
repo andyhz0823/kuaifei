@@ -87,10 +87,10 @@ func makeTunnelConfig(in *TunnelStartRequest) option.Options {
 							ProcessName: []string{
 								"Hiddify.exe",
 								"Hiddify",
-								"kuaifei.exe",
-								"kuaifei",
-								"KuaifeiCli",
-								"KuaifeiCli.exe",
+								"tkya.exe",
+								"tkya",
+								"TkyaCli",
+								"TkyaCli.exe",
 							},
 						},
 						RuleAction: option.RuleAction{

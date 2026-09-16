@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 
 $certificate = Get-Item "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction Stop
 if (-not $certificate.HasPrivateKey) {
-  throw "The Kuaifei signing certificate does not have a private key."
+  throw "The Tkya signing certificate does not have a private key."
 }
 
 $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
@@ -28,7 +28,7 @@ $targets = $allTargets | Where-Object {
 }
 
 foreach ($target in $allTargets) {
-  & $signTool sign /sha1 $CertificateThumbprint /s My /fd SHA256 /td SHA256 /tr $TimestampUrl /d "Kuaifei" $target.FullName
+  & $signTool sign /sha1 $CertificateThumbprint /s My /fd SHA256 /td SHA256 /tr $TimestampUrl /d "Tkya" $target.FullName
   if ($LASTEXITCODE -ne 0) {
     throw "Signing failed: $($target.FullName)"
   }

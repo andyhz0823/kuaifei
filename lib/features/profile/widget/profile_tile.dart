@@ -275,7 +275,7 @@ class ProfileSubscriptionInfo extends HookConsumerWidget {
 
   (String, Color?) remainingText(TranslationsEn t, ThemeData theme) {
     if (subInfo.isExpired) {
-      return ('您的订阅已到期，请到 https://*.kuaifei.top(*换为任意字母或数字，APP登录不上也换为这类地址即可) 续费或新购', theme.colorScheme.error);
+      return ('您的订阅已到期，请到 https://*.tkya.cc.cd(*换为任意字母或数字，APP登录不上也换为这类地址即可) 续费或新购', theme.colorScheme.error);
     } else if (subInfo.ratio >= 1) {
       return (t.components.subscriptionInfo.noTraffic, theme.colorScheme.error);
     } else if (subInfo.remaining.inDays > 365) {

@@ -1,12 +1,12 @@
-display_name: Kuaifei
-publisher_display_name: Kuaifei
-identity_name: kuaifei.kuaifei
-msix_version: 4.1.12.0
+display_name: Tkya
+publisher_display_name: Tkya
+identity_name: tkya.tkya
+msix_version: 1.0.1.0
 logo_path: windows\runner\resources\app_icon.ico
 capabilities: internetClient, internetClientServer, privateNetworkClientServer
 languages: ar, en-us, es-es, fa-ir, fr-fr, id-id, pt-br, ru-ru, tr-tr, zh-cn, zh-tw
 protocol_activation: hiddify, v2ray, v2rayn, v2rayng, clash, clashmeta, sing-box
-execution_alias: kuaifei
+execution_alias: tkya
 certificate_path: windows\sign.pfx
 certificate_password:
 publisher: CN=8CB43675-F44B-4AA5-9372-E8727781BDC4

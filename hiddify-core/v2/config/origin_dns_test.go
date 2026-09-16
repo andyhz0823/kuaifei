@@ -11,10 +11,10 @@ import (
 
 func TestMatchOriginDNS(t *testing.T) {
 	records := map[string][]string{
-		"*.kuaifei.top":      {"34.92.219.162"},
-		"*.edge.kuaifei.top": {"203.0.113.10"},
-		"node.kuaifei.top":   {"198.51.100.20", "invalid", "198.51.100.20"},
-		"*.kuaifei.cc.cd":    {"198.51.100.30"},
+		"*.tkya.cc.cd":      {"34.92.219.162"},
+		"*.edge.tkya.cc.cd": {"203.0.113.10"},
+		"node.tkya.cc.cd":   {"198.51.100.20", "invalid", "198.51.100.20"},
+		"*.tkya.cc.cd":    {"198.51.100.30"},
 		"*.kuaifj.top":       {"198.51.100.31"},
 		"*.kuaify.top":       {"198.51.100.32"},
 	}
@@ -24,11 +24,11 @@ func TestMatchOriginDNS(t *testing.T) {
 		host string
 		want []string
 	}{
-		{name: "exact wins", host: "NODE.KUAIFEI.TOP.", want: []string{"198.51.100.20"}},
-		{name: "longest wildcard wins", host: "hk.edge.kuaifei.top", want: []string{"203.0.113.10"}},
-		{name: "wildcard matches one or more labels", host: "a.b.kuaifei.top", want: []string{"34.92.219.162"}},
-		{name: "wildcard does not match apex", host: "kuaifei.top", want: nil},
-		{name: "kuaifei cc cd wildcard", host: "panel.kuaifei.cc.cd", want: []string{"198.51.100.30"}},
+		{name: "exact wins", host: "NODE.TKYA.TOP.", want: []string{"198.51.100.20"}},
+		{name: "longest wildcard wins", host: "hk.edge.tkya.cc.cd", want: []string{"203.0.113.10"}},
+		{name: "wildcard matches one or more labels", host: "a.b.tkya.cc.cd", want: []string{"34.92.219.162"}},
+		{name: "wildcard does not match apex", host: "tkya.cc.cd", want: nil},
+		{name: "tkya cc cd wildcard", host: "panel.tkya.cc.cd", want: []string{"198.51.100.30"}},
 		{name: "kuaifj wildcard", host: "panel.kuaifj.top", want: []string{"198.51.100.31"}},
 		{name: "kuaify wildcard", host: "panel.kuaify.top", want: []string{"198.51.100.32"}},
 		{name: "unmapped domain", host: "example.com", want: nil},

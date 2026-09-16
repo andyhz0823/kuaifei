@@ -21,7 +21,7 @@ class AppInfoEntity with _$AppInfoEntity {
 
   String get presentVersion => version;
 
-  String get displayNameWithVersion => "Kuaifei v$version";
+  String get displayNameWithVersion => "Tkya v$version";
 
   /// formats app info for sharing
   String format() =>

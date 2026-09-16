@@ -7,7 +7,7 @@ import 'package:hiddify/core/app_info/app_info_provider.dart';
 import 'package:hiddify/core/db/db.dart';
 import 'package:hiddify/core/db/provider/db_providers.dart';
 import 'package:hiddify/core/directories/directories_provider.dart';
-import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/http_client/tkya_origin.dart';
 import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/core/preferences/preferences_provider.dart';
 import 'package:hiddify/features/auth/data/origin_dns_bootstrap.dart';
@@ -27,10 +27,10 @@ final authNotifierProvider = AsyncNotifierProvider<AuthNotifier, AuthStatus>(() 
 
 class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   static const _loginTimeout = Duration(seconds: 25);
-  static const _loginTimeoutMessage = '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top';
+  static const _loginTimeoutMessage = '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.tkya.cc.cd';
   // ignore: unused_field
   static const _defaultPurchaseUrl = Constants.purchaseUrl;
-  static const _legacyPurchaseUrl = 'https://kuaifei.top';
+  static const _legacyPurchaseUrl = 'https://tkya.cc.cd';
   static const _defaultContactEmail = 'wahiya562@gmail.com';
   static const _legacyContactEmail = 'mahiya562@gmail.com';
   static const _profileRefreshInterval = Duration(minutes: 30);
@@ -42,7 +42,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
 
   @override
   Future<AuthStatus> build() async {
-    KuaifeiOrigin.restore(_prefs);
+    TkyaOrigin.restore(_prefs);
     ref.onDispose(() {
       _originRefreshTimer?.cancel();
       _profileRefreshTimer?.cancel();
@@ -181,9 +181,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   Future<bool> _persistOriginDns(XboardSubscribeResult subscribeResult) async {
     final config = subscribeResult.appConfig.originDns;
     if (config == null || !config.isUsable) return false;
-    final previousRevision = KuaifeiOrigin.config.revision;
+    final previousRevision = TkyaOrigin.config.revision;
     try {
-      final saved = await KuaifeiOrigin.replace(_prefs, config);
+      final saved = await TkyaOrigin.replace(_prefs, config);
       if (saved) {
         loggy.info('Auth: applied origin DNS revision ${config.revision} from ${config.source}');
       }
@@ -258,7 +258,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     _originRefreshTimer?.cancel();
     _profileRefreshTimer?.cancel();
 
-    final originInterval = KuaifeiOrigin.config.bootstrapRefreshInterval;
+    final originInterval = TkyaOrigin.config.bootstrapRefreshInterval;
     _originRefreshTimer = Timer.periodic(originInterval, (_) => unawaited(_refreshBootstrapConfig()));
     _profileRefreshTimer = Timer.periodic(_profileRefreshInterval, (_) => unawaited(_refreshSubscriptionProfiles()));
   }
@@ -269,7 +269,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     try {
       final changed = await OriginDnsBootstrap.refresh(_prefs, timeout: const Duration(seconds: 4));
       if (changed) {
-        loggy.info('Auth: refreshed signed bootstrap revision ${KuaifeiOrigin.config.revision}');
+        loggy.info('Auth: refreshed signed bootstrap revision ${TkyaOrigin.config.revision}');
         _scheduleRefreshes();
       }
     } catch (error, stackTrace) {

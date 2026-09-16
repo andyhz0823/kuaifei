@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
-import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/http_client/tkya_origin.dart';
 import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/features/auth/data/login_doh_resolver.dart';
 import 'package:hiddify/utils/custom_loggers.dart';
@@ -52,7 +52,7 @@ class XboardApiClient with InfraLogger {
           headers: {
             'User-Agent': userAgent,
             'Accept': 'application/json',
-            'X-Kuaifei-Panel-Host': Uri.parse(normalizeHttpUrl(baseUrl)).host.toLowerCase(),
+            'X-Tkya-Panel-Host': Uri.parse(normalizeHttpUrl(baseUrl)).host.toLowerCase(),
           },
         ),
       ) {
@@ -67,9 +67,9 @@ class XboardApiClient with InfraLogger {
   }
 
   void _configureDynamicEndpoints(String userAgent) {
-    final endpoints = <ClientAuthEndpoint>[...KuaifeiOrigin.config.authEndpoints];
+    final endpoints = <ClientAuthEndpoint>[...TkyaOrigin.config.authEndpoints];
     if (endpoints.isEmpty) {
-      final cached = _preferences?.getString(KuaifeiOrigin.endpointPoolPreferenceKey);
+      final cached = _preferences?.getString(TkyaOrigin.endpointPoolPreferenceKey);
       if (cached != null && cached.isNotEmpty) {
         try {
           final decoded = jsonDecode(cached);
@@ -89,9 +89,9 @@ class XboardApiClient with InfraLogger {
       final headers = <String, dynamic>{
         'User-Agent': userAgent,
         'Accept': 'application/json',
-        'X-Kuaifei-Panel-Host': _baseUri.host.toLowerCase(),
+        'X-Tkya-Panel-Host': _baseUri.host.toLowerCase(),
       };
-      if (endpoint.routeId != null) headers['X-Kuaifei-Route-Id'] = endpoint.routeId;
+      if (endpoint.routeId != null) headers['X-Tkya-Route-Id'] = endpoint.routeId;
       final dio = Dio(
         BaseOptions(
           baseUrl: normalizedUrl,
@@ -110,7 +110,7 @@ class XboardApiClient with InfraLogger {
   }
 
   void _restorePreferredEndpoint() {
-    final cached = _preferences?.getString(KuaifeiOrigin.lastKnownGoodEndpointPreferenceKey);
+    final cached = _preferences?.getString(TkyaOrigin.lastKnownGoodEndpointPreferenceKey);
     if (cached == null || cached.isEmpty) return;
     try {
       final decoded = jsonDecode(cached);
@@ -133,7 +133,7 @@ class XboardApiClient with InfraLogger {
     if (endpointUrl == null || _preferences == null) return;
     unawaited(
       _preferences.setString(
-        KuaifeiOrigin.lastKnownGoodEndpointPreferenceKey,
+        TkyaOrigin.lastKnownGoodEndpointPreferenceKey,
         jsonEncode({'id': transport, 'url': endpointUrl, 'saved_at': DateTime.now().millisecondsSinceEpoch}),
       ),
     );
@@ -142,7 +142,7 @@ class XboardApiClient with InfraLogger {
   void _configureAdapter(Dio dio) {
     dio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
-        final client = HttpClient(context: KuaifeiOrigin.securityContext)
+        final client = HttpClient(context: TkyaOrigin.securityContext)
           ..connectionTimeout = requestTimeout
           ..findProxy = (uri) => 'DIRECT';
         client.connectionFactory = (uri, proxyHost, proxyPort) async {
@@ -156,7 +156,7 @@ class XboardApiClient with InfraLogger {
   String? _preferredTransport;
 
   Future<void> prewarm() async {
-    final cached = KuaifeiOrigin.addressesForHost(_baseUri.host);
+    final cached = TkyaOrigin.addressesForHost(_baseUri.host);
     if (cached.isNotEmpty) {
       loggy.debug('Auth: loaded cached origin routing for ${_baseUri.host}: ${cached.join(', ')}');
       return;
@@ -180,7 +180,7 @@ class XboardApiClient with InfraLogger {
   }
 
   Future<Socket> _connectForUri(Uri uri) async {
-    final cached = KuaifeiOrigin.connectionAddressesForHost(uri.host).map(InternetAddress.new).toList(growable: false);
+    final cached = TkyaOrigin.connectionAddressesForHost(uri.host).map(InternetAddress.new).toList(growable: false);
     Object? lastError;
     if (cached.isNotEmpty) {
       try {
@@ -230,7 +230,7 @@ class XboardApiClient with InfraLogger {
 
   Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {
     if (!uri.isScheme('https')) return Future.value(socket);
-    return SecureSocket.secure(socket, host: uri.host, context: KuaifeiOrigin.securityContext);
+    return SecureSocket.secure(socket, host: uri.host, context: TkyaOrigin.securityContext);
   }
 
   void setToken(String token) {
@@ -375,7 +375,7 @@ class XboardApiClient with InfraLogger {
     final withScheme = normalized.contains('://') ? normalized : 'https://$normalized';
     final uri = Uri.tryParse(withScheme);
     if (uri == null) return withScheme;
-    final canonicalHost = KuaifeiOrigin.normalizeHost(uri.host);
+    final canonicalHost = TkyaOrigin.normalizeHost(uri.host);
     if (canonicalHost == null || canonicalHost == uri.host) return withScheme;
     return uri.replace(host: canonicalHost).toString();
   }

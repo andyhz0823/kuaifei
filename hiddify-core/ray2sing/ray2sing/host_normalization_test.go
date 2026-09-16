@@ -4,9 +4,9 @@ import "testing"
 
 func TestNormalizeConnectionHost(t *testing.T) {
 	tests := map[string]string{
-		"*.kuaifei.top":           "kuaifei.top",
-		"HTTPS://WK.KUAIFEI.TOP/": "wk.kuaifei.top",
-		"wk.kuaifei.top:443":      "wk.kuaifei.top",
+		"*.tkya.cc.cd":           "tkya.cc.cd",
+		"HTTPS://WK.TKYA.TOP/": "wk.tkya.cc.cd",
+		"wk.tkya.cc.cd:443":      "wk.tkya.cc.cd",
 		"[2001:db8::1]":           "2001:db8::1",
 		"[2001:db8::1]:443":       "2001:db8::1",
 		"example.com.":            "example.com",

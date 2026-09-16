@@ -127,8 +127,8 @@ class OriginDnsConfig {
     final rawRecords = json['records'];
     if (rawRecords is Map) {
       for (final entry in rawRecords.entries) {
-        final host = KuaifeiOrigin.normalizePattern(entry.key.toString());
-        final addresses = KuaifeiOrigin.normalizeAddresses(entry.value);
+        final host = TkyaOrigin.normalizePattern(entry.key.toString());
+        final addresses = TkyaOrigin.normalizeAddresses(entry.value);
         if (host != null && addresses.isNotEmpty) records[host] = addresses;
       }
     }
@@ -167,7 +167,7 @@ class OriginDnsConfig {
     }
 
     return OriginDnsConfig(
-      source: KuaifeiOrigin.normalizeHost(json['source']?.toString() ?? '') ?? '',
+      source: TkyaOrigin.normalizeHost(json['source']?.toString() ?? '') ?? '',
       revision: revision,
       refreshInterval: Duration(seconds: refreshSeconds.clamp(300, 86400)),
       bootstrapRefreshInterval: Duration(seconds: bootstrapRefreshSeconds.clamp(900, 86400)),
@@ -194,8 +194,8 @@ class OriginDnsConfig {
   };
 }
 
-class KuaifeiOrigin {
-  const KuaifeiOrigin._();
+class TkyaOrigin {
+  const TkyaOrigin._();
 
   static const _cloudflareOriginCaRsa = '''
 -----BEGIN CERTIFICATE-----
@@ -248,14 +248,15 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   // These are Cloudflare edge addresses, not the origin server. The original URI
   // host remains in use for TLS SNI and the HTTP Host header.
   static const Map<String, List<String>> distributionBootstrapRecords = {
-    'xz.kuaity.top': cloudflareEdgeFallbackAddresses,
+    'xz.tkya.cc.cd': cloudflareEdgeFallbackAddresses,
   };
 
-  // The primary panel domain must remain reachable even if DNS, Cloudflare,
-  // or a cached origin-dns record is unavailable. Keep the original URI host for
-  // TLS SNI and HTTP Host while dialing this fixed production origin address.
+  // Every panel host under the primary domain must stay reachable even if DNS
+  // or a cached origin-dns record is unavailable. These are Cloudflare edge
+  // addresses, not the origin server: the original URI host is still used for
+  // TLS SNI and the HTTP Host header so Cloudflare routes back to the origin.
   static const Map<String, List<String>> builtinFallbackRecords = {
-    'kuaifei.top': ['34.92.219.162'],
+    '*.tkya.cc.cd': cloudflareEdgeFallbackAddresses,
   };
 
   static const List<String> protectedPanelBaseDomains = [];
@@ -306,9 +307,8 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   }
 
   static List<String> addressesForHost(String host) {
-    // The fixed primary-origin route intentionally wins over remotely supplied
-    // records, preventing a stale cache from routing kuaifei.top back to an
-    // unreachable Cloudflare edge.
+    // The pinned primary-domain route intentionally wins over remotely supplied
+    // records, so a stale cache can never route panel hosts somewhere unreachable.
     final builtin = _match(builtinFallbackRecords, host);
     if (builtin.isNotEmpty) return builtin;
     return _match(_config.records, host);

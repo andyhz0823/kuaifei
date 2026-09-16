@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""从 GitHub Release 生成 Kuaifei 更新通道清单。
+"""从 GitHub Release 生成 Tkya 更新通道清单。
 
 产出（写入 --out 目录）：
   latest.json          Android 端 AppUpdateRepositoryImpl.getLatestVersion() 读取
@@ -36,7 +36,7 @@ EXTRA_ASSETS = ("SHA256SUMS.txt", "SIGSTORE-VERIFICATION.txt")
 
 
 def http_get(url: str) -> bytes:
-    headers = {"User-Agent": "kuaifei-update-channel"}
+    headers = {"User-Agent": "tkya-update-channel"}
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if token:
         # 命中 GitHub API 时才带鉴权，避免把 token 发给 release 资产域名
@@ -126,7 +126,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", required=True, help="Release 标签，例如 v4.1.14")
     ap.add_argument("--repo", required=True, help="owner/name")
-    ap.add_argument("--base-url", required=True, help="分发基址，例如 https://xz.kuaity.top/Downloads")
+    ap.add_argument("--base-url", required=True, help="分发基址，例如 https://xz.tkya.cc.cd/Downloads")
     ap.add_argument("--out", required=True, help="清单输出目录")
     ap.add_argument(
         "--require-assets",
@@ -211,7 +211,7 @@ def main() -> int:
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">\n'
         "  <channel>\n"
-        "    <title>Kuaifei Release</title>\n"
+        "    <title>Tkya Release</title>\n"
         f"{items}"
         "  </channel>\n"
         "</rss>\n"

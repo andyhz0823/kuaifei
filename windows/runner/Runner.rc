@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "kuaifei" "\0"
-            VALUE "FileDescription", "kuaifei" "\0"
+            VALUE "CompanyName", "tkya" "\0"
+            VALUE "FileDescription", "tkya" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "kuaifei" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2024 kuaifei. All rights reserved." "\0"
-            VALUE "OriginalFilename", "kuaifei.exe" "\0"
-            VALUE "ProductName", "kuaifei" "\0"
+            VALUE "InternalName", "tkya" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2024 tkya. All rights reserved." "\0"
+            VALUE "OriginalFilename", "tkya.exe" "\0"
+            VALUE "ProductName", "tkya" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

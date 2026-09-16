@@ -4,7 +4,7 @@ project(hiddify LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "kuaifei")
+set(BINARY_NAME "tkya")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
@@ -95,7 +95,7 @@ install(CODE "
   " COMPONENT Runtime)
 
 install(FILES "../hiddify-core/bin/HiddifyCli.exe" DESTINATION "${CMAKE_INSTALL_PREFIX}"
-COMPONENT Runtime RENAME KuaifeiCli.exe)
+COMPONENT Runtime RENAME TkyaCli.exe)
 
 
 if(PLUGIN_BUNDLED_LIBRARIES)

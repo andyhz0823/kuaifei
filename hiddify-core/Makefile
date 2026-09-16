@@ -3,7 +3,7 @@ PRODUCT_NAME=hiddify-core
 BASENAME=$(PRODUCT_NAME)
 BINDIR=bin
 LIBNAME=$(PRODUCT_NAME)
-CLINAME=KuaifeiCli
+CLINAME=TkyaCli
 
 BRANCH=$(shell git branch --show-current)
 VERSION=$(shell git describe --tags || echo "unknown version")

@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/http_client/tkya_origin.dart';
 import 'package:hiddify/core/model/constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -13,7 +13,7 @@ class OriginDnsBootstrap {
   static const _publicKeyBase64 = '2OgYgpyYnI53e7hSNxh6OX4pjbLx5r0WDE/tnphd9ug=';
 
   static Future<bool> refresh(SharedPreferences preferences, {Duration timeout = const Duration(seconds: 6)}) async {
-    final client = HttpClient(context: KuaifeiOrigin.securityContext)
+    final client = HttpClient(context: TkyaOrigin.securityContext)
       ..connectionTimeout = timeout
       ..findProxy = (_) => 'DIRECT';
     client.connectionFactory = (requestUri, proxyHost, proxyPort) async {
@@ -27,15 +27,15 @@ class OriginDnsBootstrap {
           request.headers.set(HttpHeaders.acceptHeader, 'application/json');
           final panelHost = _panelHost(preferences);
           if (panelHost != null) {
-            request.headers.set('X-Kuaifei-Panel-Host', panelHost);
+            request.headers.set('X-Tkya-Panel-Host', panelHost);
           }
           final response = await request.close().timeout(timeout);
           if (response.statusCode != HttpStatus.ok) continue;
           final body = await utf8.decoder.bind(response).join().timeout(timeout);
           final config = await _verify(body);
           if (config == null) continue;
-          if (config.revision == KuaifeiOrigin.config.revision) return false;
-          return KuaifeiOrigin.replace(preferences, config, onlyIfNewer: true);
+          if (config.revision == TkyaOrigin.config.revision) return false;
+          return TkyaOrigin.replace(preferences, config, onlyIfNewer: true);
         } catch (_) {
           // Try the compatibility endpoint before retaining the cached document.
         }
@@ -68,7 +68,7 @@ class OriginDnsBootstrap {
   }
 
   static Future<Socket> _connect(Uri uri, Duration timeout) async {
-    final addresses = KuaifeiOrigin.connectionAddressesForHost(uri.host);
+    final addresses = TkyaOrigin.connectionAddressesForHost(uri.host);
     Object? lastError;
     for (final address in addresses) {
       try {
@@ -87,7 +87,7 @@ class OriginDnsBootstrap {
 
   static Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {
     if (!uri.isScheme('https')) return Future.value(socket);
-    return SecureSocket.secure(socket, host: uri.host, context: KuaifeiOrigin.securityContext);
+    return SecureSocket.secure(socket, host: uri.host, context: TkyaOrigin.securityContext);
   }
 
   static String? _panelHost(SharedPreferences preferences) {
@@ -96,7 +96,7 @@ class OriginDnsBootstrap {
       if (value == null || value.trim().isEmpty) continue;
       final uri = Uri.tryParse(value.contains('://') ? value : 'https://$value');
       final host = uri?.host.toLowerCase();
-      final normalizedHost = host == null ? null : KuaifeiOrigin.normalizeHost(host);
+      final normalizedHost = host == null ? null : TkyaOrigin.normalizeHost(host);
       if (normalizedHost != null) return normalizedHost;
     }
     return null;

@@ -261,7 +261,7 @@ class ProfileParser {
     // User-Agent. The default app UA intentionally advertises several client
     // families ("like ClashMeta v2ray sing-box"). That is good for generic
     // compatibility, but Xboard may choose ClashMeta before SingBox and omit the
-    // native sing-box ECH object. For Kuaifei's own profile import we request
+    // native sing-box ECH object. For Tkya's own profile import we request
     // the Hiddify/SingBox generator explicitly while preserving the app version.
     final versionMatch = RegExp(r'/(v?\d+(?:\.\d+){0,3})').firstMatch(trimmed);
     final version = versionMatch?.group(1)?.replaceFirst(RegExp('^v', caseSensitive: false), '') ?? '4.1.0';

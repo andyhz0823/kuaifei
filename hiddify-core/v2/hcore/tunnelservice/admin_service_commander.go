@@ -148,11 +148,11 @@ func getTunnelServicePath() string {
 	binFolder := filepath.Dir(exePath)
 	switch runtime.GOOS {
 	case "windows":
-		fullPath = "KuaifeiCli.exe"
+		fullPath = "TkyaCli.exe"
 	case "darwin":
 		fallthrough
 	default:
-		fullPath = "KuaifeiCli"
+		fullPath = "TkyaCli"
 	}
 
 	abspath, _ := filepath.Abs(filepath.Join(binFolder, fullPath))

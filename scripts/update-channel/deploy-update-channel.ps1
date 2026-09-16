@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  把已发布的 Kuaifei GitHub Release 投放到客户端更新通道（xz.kuaity.top/Downloads）。
+  把已发布的 Tkya GitHub Release 投放到客户端更新通道（xz.tkya.cc.cd/Downloads）。
 
 .DESCRIPTION
   本地手动执行版 —— 仓库内不保存任何服务器私钥。
@@ -20,7 +20,7 @@
 
 .EXAMPLE
   # 推荐：私钥路径走环境变量，避免把本机路径写进脚本
-  $env:KUAIFEI_DEPLOY_SSH_KEY = 'D:\path\to\deploy.pem'
+  $env:TKYA_DEPLOY_SSH_KEY = 'D:\path\to\deploy.pem'
   .\deploy-update-channel.ps1 -Tag v4.1.14
 
 .EXAMPLE
@@ -32,12 +32,12 @@ param(
   [string]$Tag,
 
   [string]$Repo = 'andyhz0823/kuaifei',
-  [string]$SshKeyPath = $env:KUAIFEI_DEPLOY_SSH_KEY,
-  [string]$DeployHost = '216.18.193.108',
+  [string]$SshKeyPath = $env:TKYA_DEPLOY_SSH_KEY,
+  [string]$DeployHost = '192.236.214.109',
   [string]$DeployUser = 'root',
   [int]$SshPort = 22,
   [string]$RemotePath = '/www/wwwroot/kuaifei.top/Downloads',
-  [string]$BaseUrl = 'https://xz.kuaity.top/Downloads',
+  [string]$BaseUrl = 'https://xz.tkya.cc.cd/Downloads',
   [string]$PythonExe = '',
   [switch]$SkipVerify
 )
@@ -65,7 +65,7 @@ if ($Tag -notmatch '^v\d+(\.\d+)*$') {
 if ([string]::IsNullOrWhiteSpace($SshKeyPath)) {
   Die @"
 未提供 SSH 私钥路径。请任选其一：
-    - 设置环境变量：`$env:KUAIFEI_DEPLOY_SSH_KEY = '<私钥路径>'
+    - 设置环境变量：`$env:TKYA_DEPLOY_SSH_KEY = '<私钥路径>'
     - 显式传参：     -SshKeyPath '<私钥路径>'
 "@
 }
@@ -103,7 +103,7 @@ foreach ($f in @($genScript, $mirrorScript)) {
 }
 
 # ---------------------------------------------------------------- 工作目录
-$work = Join-Path ([System.IO.Path]::GetTempPath()) ('kuaifei-channel-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+$work = Join-Path ([System.IO.Path]::GetTempPath()) ('tkya-channel-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 $manifestsDir = Join-Path $work 'manifests'
 New-Item -ItemType Directory -Path $manifestsDir -Force | Out-Null
 
@@ -148,12 +148,12 @@ try {
 
   # ------------------------------------------------------------ 2. 上传远端脚本
   Info "上传远端投放脚本到 $remote"
-  & scp @scpOpts $mirrorScript "${remote}:/tmp/kuaifei-remote-mirror.sh"
+  & scp @scpOpts $mirrorScript "${remote}:/tmp/tkya-remote-mirror.sh"
   if ($LASTEXITCODE -ne 0) { Die '远端脚本上传失败' }
 
   # ------------------------------------------------------------ 3. 远端拉取 + 镜像
   $quoted = ($assetList | ForEach-Object { "'" + ($_ -replace "'", "'\''") + "'" }) -join ' '
-  $remoteCmd = "bash /tmp/kuaifei-remote-mirror.sh '$Tag' '$RemotePath' '$dlBase' $quoted; rc=`$?; rm -f /tmp/kuaifei-remote-mirror.sh; exit `$rc"
+  $remoteCmd = "bash /tmp/tkya-remote-mirror.sh '$Tag' '$RemotePath' '$dlBase' $quoted; rc=`$?; rm -f /tmp/tkya-remote-mirror.sh; exit `$rc"
 
   Info "服务器直连 GitHub 拉取产物并镜像到 $RemotePath"
   & ssh @sshOpts $remote $remoteCmd

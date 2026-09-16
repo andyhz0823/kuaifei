@@ -1,22 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
-    <title>Kuaifei Release</title>
+    <title>Tkya Release</title>
     <item>
-      <title>Version 4.1.14+40116</title>
-      <pubDate>Wed, 16 Sep 2026 13:53:25 GMT</pubDate>
+      <title>Version 1.0.1+10001</title>
+      <pubDate>Thu, 17 Sep 2026 00:00:00 GMT</pubDate>
       <enclosure
-        url="https://xz.kuaity.top/Downloads/Kuaifei-v4.1.14-android-arm64-v8a.apk"
-        sparkle:version="4.1.14+40116" sparkle:shortVersionString="4.1.14" sparkle:os="android"
-        sparkle:length="119540199" />
+        url="https://xz.tkya.cc.cd/Downloads/Tkya-v1.0.1-android-arm64-v8a.apk"
+        sparkle:version="1.0.1+10001" sparkle:shortVersionString="1.0.1" sparkle:os="android" />
     </item>
     <item>
-      <title>Version 4.1.14+40116</title>
-      <pubDate>Wed, 16 Sep 2026 13:53:25 GMT</pubDate>
+      <title>Version 1.0.1+10001</title>
+      <pubDate>Thu, 17 Sep 2026 00:00:00 GMT</pubDate>
       <enclosure
-        url="https://xz.kuaity.top/Downloads/kuaifei-4.1.14.exe"
-        sparkle:version="4.1.14+40116" sparkle:shortVersionString="4.1.14" sparkle:os="windows"
-        sparkle:length="37123611" />
+        url="https://xz.tkya.cc.cd/Downloads/tkya-1.0.1.exe"
+        sparkle:version="1.0.1+10001" sparkle:shortVersionString="1.0.1" sparkle:os="windows" />
     </item>
   </channel>
 </rss>

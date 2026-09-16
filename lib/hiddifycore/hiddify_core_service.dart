@@ -6,7 +6,7 @@ import 'dart:math';
 import 'package:fpdart/fpdart.dart';
 import 'package:grpc/grpc.dart';
 import 'package:hiddify/core/directories/directories_provider.dart';
-import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/http_client/tkya_origin.dart';
 import 'package:hiddify/core/model/directories.dart';
 import 'package:hiddify/core/notification/in_app_notification_controller.dart';
 import 'package:hiddify/core/preferences/general_preferences.dart';
@@ -120,7 +120,7 @@ class HiddifyCoreService with InfraLogger {
       // latestOptions = options;
       try {
         final settings = options.toJson();
-        settings['origin-dns'] = KuaifeiOrigin.exportCoreRecords();
+        settings['origin-dns'] = TkyaOrigin.exportCoreRecords();
         final settingsJson = jsonEncode(settings);
         final res = await core.fgClient.changeHiddifySettings(
           ChangeHiddifySettingsRequest(hiddifySettingsJson: settingsJson),

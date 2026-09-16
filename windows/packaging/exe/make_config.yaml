@@ -1,10 +1,10 @@
 app_id: 6L903538-42B1-4596-G479-BJ779F21A65D
-publisher: kuaifei
+publisher: tkya
 publisher_url: https://github.com/hiddify/hiddify-app
-display_name: kuaifei
-executable_name: kuaifei.exe
+display_name: tkya
+executable_name: tkya.exe
 create_desktop_icon: true
-install_dir_name: "{autopf64}\\kuaifei"
+install_dir_name: "{autopf64}\\tkya"
 setup_icon_file: windows\runner\resources\app_icon.ico
 locales:
   - ar

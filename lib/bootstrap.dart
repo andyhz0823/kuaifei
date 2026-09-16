@@ -6,7 +6,7 @@ import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:hiddify/core/analytics/analytics_controller.dart';
 import 'package:hiddify/core/app_info/app_info_provider.dart';
 import 'package:hiddify/core/directories/directories_provider.dart';
-import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/http_client/tkya_origin.dart';
 import 'package:hiddify/core/localization/translations.dart';
 import 'package:hiddify/core/logger/logger.dart';
 import 'package:hiddify/core/logger/logger_controller.dart';
@@ -62,7 +62,7 @@ Future<void> lazyBootstrap(WidgetsBinding widgetsBinding, Environment env) async
     }
   });
 
-  KuaifeiOrigin.restore(container.read(sharedPreferencesProvider).requireValue);
+  TkyaOrigin.restore(container.read(sharedPreferencesProvider).requireValue);
 
   final debug = container.read(debugModeNotifierProvider) || kDebugMode;
 
