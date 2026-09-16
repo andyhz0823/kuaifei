@@ -10,13 +10,13 @@ PowerShell example:
 
 ```powershell
 cosign verify-blob `
-  --bundle .\Tkya-v1.0.1-android-arm64-v8a.apk.sigstore.json `
-  --certificate-identity "https://github.com/andyhz0823/kuaifei/.github/workflows/release.yml@refs/tags/v1.0.1" `
+  --bundle .\Tkya-v1.0.2-android-arm64-v8a.apk.sigstore.json `
+  --certificate-identity "https://github.com/andyhz0823/kuaifei/.github/workflows/release.yml@refs/tags/v1.0.2" `
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" `
-  .\Tkya-v1.0.1-android-arm64-v8a.apk
+  .\Tkya-v1.0.2-android-arm64-v8a.apk
 ```
 
-For another normal tag-triggered release, replace `v1.0.1` in both the filename and the certificate identity. Verify the corresponding `.exe`, `.zip`, `SHA256SUMS.txt`, and `SIGSTORE-VERIFICATION.txt` in the same way.
+For another normal tag-triggered release, replace `v1.0.2` in both the filename and the certificate identity. Verify the corresponding `.exe`, `.zip`, `SHA256SUMS.txt`, and `SIGSTORE-VERIFICATION.txt` in the same way.
 
 For a manually dispatched release, use the exact `certificate_identity` and `certificate_oidc_issuer` recorded in the published `SIGSTORE-VERIFICATION.txt`; its Git reference can be a branch rather than the release tag.
 

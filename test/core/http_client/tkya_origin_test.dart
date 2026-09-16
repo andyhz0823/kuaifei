@@ -7,15 +7,18 @@ void main() {
     expect(() => TkyaOrigin.securityContext, returnsNormally);
   });
 
-  test('pins every panel host under the primary domain to the Cloudflare edge', () {
+  test('pins the apex, www and every subdomain to the Cloudflare edge', () {
     // Panel hosts are dialled at the Cloudflare edge; the URI host is kept for
     // TLS SNI and the HTTP Host header so Cloudflare routes back to the origin.
+    // The apex is pinned explicitly: a wildcard never matches the apex host, and
+    // the apex is exactly what a user types into the panel address field.
+    expect(TkyaOrigin.addressesForHost('tkya.cc.cd'), TkyaOrigin.cloudflareEdgeFallbackAddresses);
+    expect(TkyaOrigin.addressesForHost('www.tkya.cc.cd'), TkyaOrigin.cloudflareEdgeFallbackAddresses);
     expect(TkyaOrigin.addressesForHost('panel.tkya.cc.cd'), TkyaOrigin.cloudflareEdgeFallbackAddresses);
     expect(TkyaOrigin.connectionAddressesForHost('KK44V.TKYA.CC.CD.'), TkyaOrigin.cloudflareEdgeFallbackAddresses);
     expect(TkyaOrigin.connectionAddressesForHost('xz.tkya.cc.cd'), TkyaOrigin.cloudflareEdgeFallbackAddresses);
-    // The apex is intentionally not pinned: only subdomains carry the panel.
-    expect(TkyaOrigin.addressesForHost('tkya.cc.cd'), isEmpty);
     expect(TkyaOrigin.addressesForHost('example.com'), isEmpty);
+    expect(TkyaOrigin.exportCoreRecords()['tkya.cc.cd'], TkyaOrigin.cloudflareEdgeFallbackAddresses);
     expect(TkyaOrigin.exportCoreRecords()['*.tkya.cc.cd'], TkyaOrigin.cloudflareEdgeFallbackAddresses);
   });
 

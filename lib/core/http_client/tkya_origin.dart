@@ -255,7 +255,11 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   // or a cached origin-dns record is unavailable. These are Cloudflare edge
   // addresses, not the origin server: the original URI host is still used for
   // TLS SNI and the HTTP Host header so Cloudflare routes back to the origin.
+  // The apex and www are listed explicitly because a `*.tkya.cc.cd` wildcard
+  // never matches the apex host itself, and the apex is what users type in.
   static const Map<String, List<String>> builtinFallbackRecords = {
+    'tkya.cc.cd': cloudflareEdgeFallbackAddresses,
+    'www.tkya.cc.cd': cloudflareEdgeFallbackAddresses,
     '*.tkya.cc.cd': cloudflareEdgeFallbackAddresses,
   };
 
