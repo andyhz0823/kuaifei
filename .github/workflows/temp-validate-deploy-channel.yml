@@ -1,0 +1,33 @@
+name: Temp validate deploy-channel
+
+# 临时工作流：只为在真实 CI 环境中验证 deploy-channel 的投放脚本，
+# 幂等地重投一个已存在的 Release（内容不变）。验证完成后即删除本文件。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to re-mirror, for example v4.1.14
+        required: true
+        default: v4.1.14
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-channel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Deploy release to client update channel
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          CHANNEL_BASE_URL: ${{ secrets.CHANNEL_BASE_URL }}
+        run: bash .github/scripts/publish_update_channel.sh
