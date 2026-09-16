@@ -104,6 +104,12 @@ jobs:
           distribution: zulu
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          # Google removed the legacy "tools" package from the SDK repository, so the
+          # action default "tools platform-tools" now fails with
+          # "Failed to find package 'tools'". The runner image already ships the full
+          # Android SDK, so platform-tools is enough here.
+          packages: 'platform-tools'
       - name: Restore Android release signing key
         if: needs.preflight.outputs.android_signing_ready == 'true'
         shell: bash
