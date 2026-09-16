@@ -11,12 +11,12 @@ import (
 
 func TestMatchOriginDNS(t *testing.T) {
 	records := map[string][]string{
-		"*.tkya.cc.cd":      {"34.92.219.162"},
+		"*.tkya.cc.cd":      {"198.51.100.10"},
 		"*.edge.tkya.cc.cd": {"203.0.113.10"},
 		"node.tkya.cc.cd":   {"198.51.100.20", "invalid", "198.51.100.20"},
 		"*.xz.tkya.cc.cd":   {"198.51.100.30"},
-		"*.kuaifj.top":      {"198.51.100.31"},
-		"*.kuaify.top":      {"198.51.100.32"},
+		"*.alpha.example":   {"198.51.100.31"},
+		"*.beta.example":    {"198.51.100.32"},
 	}
 
 	tests := []struct {
@@ -26,11 +26,11 @@ func TestMatchOriginDNS(t *testing.T) {
 	}{
 		{name: "exact wins", host: "NODE.TKYA.CC.CD.", want: []string{"198.51.100.20"}},
 		{name: "longest wildcard wins", host: "hk.edge.tkya.cc.cd", want: []string{"203.0.113.10"}},
-		{name: "wildcard matches one or more labels", host: "a.b.tkya.cc.cd", want: []string{"34.92.219.162"}},
+		{name: "wildcard matches one or more labels", host: "a.b.tkya.cc.cd", want: []string{"198.51.100.10"}},
 		{name: "wildcard does not match apex", host: "tkya.cc.cd", want: nil},
 		{name: "update zone wildcard", host: "dl.xz.tkya.cc.cd", want: []string{"198.51.100.30"}},
-		{name: "kuaifj wildcard", host: "panel.kuaifj.top", want: []string{"198.51.100.31"}},
-		{name: "kuaify wildcard", host: "panel.kuaify.top", want: []string{"198.51.100.32"}},
+		{name: "first other zone wildcard", host: "panel.alpha.example", want: []string{"198.51.100.31"}},
+		{name: "second other zone wildcard", host: "panel.beta.example", want: []string{"198.51.100.32"}},
 		{name: "unmapped domain", host: "example.com", want: nil},
 		{name: "ip server is ignored", host: "192.0.2.1", want: nil},
 	}
@@ -46,7 +46,7 @@ func TestMatchOriginDNS(t *testing.T) {
 
 func TestOriginDNSResolverUsesOnlySignedRecordsForStaticMapping(t *testing.T) {
 	records := map[string][]string{
-		"*.origin.example": {"34.92.219.162"},
+		"*.origin.example": {"198.51.100.10"},
 		"saas.sin.fan":     {"172.67.207.145"},
 	}
 
@@ -87,7 +87,7 @@ func TestOriginDNSResolverUsesOnlySignedRecordsForStaticMapping(t *testing.T) {
 	if protectedOpts.DialerOptions.DomainResolver == nil || protectedOpts.DialerOptions.DomainResolver.Server != DNSStaticTag {
 		t.Fatalf("protected server domain was not pinned to dns-static: %#v", protectedOpts.DialerOptions.DomainResolver)
 	}
-	if !reflect.DeepEqual(staticIPs["node.origin.example"], []string{"34.92.219.162"}) {
+	if !reflect.DeepEqual(staticIPs["node.origin.example"], []string{"198.51.100.10"}) {
 		t.Fatalf("protected server domain static IPs = %#v", staticIPs)
 	}
 }
@@ -130,7 +130,7 @@ func TestPatchOutboundECHDisablesDemoConfigForUnprotectedSNI(t *testing.T) {
 			ServerOptions: option.ServerOptions{Server: "www.visa.cn", ServerPort: 443},
 			OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: &option.OutboundTLSOptions{
 				Enabled:    true,
-				ServerName: "ut.kuaify.dpdns.org",
+				ServerName: "ut.node.example",
 				ECH: &option.OutboundECHOptions{
 					Enabled: true,
 					Config:  badoption.Listable[string]{"-----BEGIN ECH CONFIGS-----\nZXhhbXBsZS5jb20=\n-----END ECH CONFIGS-----"},
@@ -144,7 +144,7 @@ func TestPatchOutboundECHDisablesDemoConfigForUnprotectedSNI(t *testing.T) {
 	if tls.ECH == nil || !tls.ECH.Enabled {
 		t.Fatalf("demo ECH config should stay enabled for dynamic fetch, got: %#v", tls.ECH)
 	}
-	if tls.ECH.QueryServerName != "ut.kuaify.dpdns.org" {
+	if tls.ECH.QueryServerName != "ut.node.example" {
 		t.Fatalf("dynamic ECH should query the node SNI, got %#v", tls.ECH.QueryServerName)
 	}
 }

@@ -32,7 +32,7 @@ void main() {
       bootstrapRefreshInterval: Duration(hours: 6),
       authEndpoints: [],
       records: {
-        '*.example.com': ['34.92.219.162'],
+        '*.example.com': ['198.51.100.10'],
         '*.edge.example.com': ['203.0.113.10'],
         'node.example.com': ['198.51.100.20'],
       },
@@ -41,17 +41,17 @@ void main() {
     expect(await TkyaOrigin.replace(preferences, config), isTrue);
     expect(TkyaOrigin.addressesForHost('NODE.EXAMPLE.COM.'), ['198.51.100.20']);
     expect(TkyaOrigin.addressesForHost('hk.edge.example.com'), ['203.0.113.10']);
-    expect(TkyaOrigin.addressesForHost('other.example.com'), ['34.92.219.162']);
-    expect(TkyaOrigin.addressesForHost('example.com'), ['34.92.219.162']);
+    expect(TkyaOrigin.addressesForHost('other.example.com'), ['198.51.100.10']);
+    expect(TkyaOrigin.addressesForHost('example.com'), ['198.51.100.10']);
     expect(TkyaOrigin.addressesForHost('example.org'), isEmpty);
 
     TkyaOrigin.restore(preferences);
     expect(TkyaOrigin.config.revision, 42);
     final exportedRecords = TkyaOrigin.exportCoreRecords();
-    expect(exportedRecords['*.example.com'], ['34.92.219.162']);
+    expect(exportedRecords['*.example.com'], ['198.51.100.10']);
     expect(exportedRecords['*.edge.example.com'], ['203.0.113.10']);
     expect(exportedRecords['node.example.com'], ['198.51.100.20']);
-    expect(exportedRecords['example.com'], ['34.92.219.162']);
+    expect(exportedRecords['example.com'], ['198.51.100.10']);
   });
 
   test('parses dynamic JSON address lists without runtime casts', () {
@@ -60,12 +60,12 @@ void main() {
       'revision': 43,
       'refresh_interval': 900,
       'records': {
-        '*.example.com': ['34.92.219.162', 'invalid'],
+        '*.example.com': ['198.51.100.10', 'invalid'],
         'node.example.com': ['198.51.100.20'],
       },
     });
 
-    expect(config.records['*.example.com'], ['34.92.219.162']);
+    expect(config.records['*.example.com'], ['198.51.100.10']);
     expect(config.records['node.example.com'], ['198.51.100.20']);
   });
 
@@ -97,10 +97,10 @@ void main() {
       'deep.wk.tkya.cc.cd',
       'example.net',
       'wk.example.net',
-      'kuaifj.top',
-      'wk.kuaifj.top',
-      'kuaify.top',
-      'wk.kuaify.top',
+      'alpha.example',
+      'wk.alpha.example',
+      'beta.example',
+      'wk.beta.example',
     ]) {
       expect(TkyaOrigin.isProtectedPanelHost(host), isFalse, reason: host);
       expect(TkyaOrigin.prefersRelayForPanelHost(host), isFalse, reason: host);
