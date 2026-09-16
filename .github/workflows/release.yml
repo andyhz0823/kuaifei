@@ -278,25 +278,3 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: out/*
-
-  # 把已发布的 Release 投放到客户端更新通道（xz.kuaity.top/Downloads）：
-  # 目标服务器直连 GitHub 拉取产物并做 SHA-256 校验，再取回三份清单。
-  # 未配置 DEPLOY_SSH_KEY 时此 job 只打印提示并安全跳过。
-  deploy-channel:
-    needs: [preflight, publish]
-    if: needs.preflight.outputs.publish == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Deploy release to client update channel
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-          CHANNEL_BASE_URL: ${{ secrets.CHANNEL_BASE_URL }}
-        run: bash .github/scripts/publish_update_channel.sh

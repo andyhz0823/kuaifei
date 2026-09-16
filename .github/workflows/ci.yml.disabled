@@ -1,0 +1,50 @@
+# ⛔ 本工作流已停用（2026-09-16），保留文件仅作参考。
+#
+# 停用原因：
+#   1. 它调用的 .github/workflows/build.yml 是上游 hiddify/hiddify-app 原样搬过来的，
+#      依赖 APPLE_CERTIFICATE_P12 / WINDOWS_SIGNING_KEY / TOKEN_FOR_HIDDIFY_APP_REPO /
+#      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON 等 kuaifei 仓库并不存在的 secrets，
+#      因此自 2026-08-14 建库起 20 次运行无一成功。
+#   2. 其 update-draft job 会在本仓库反复创建名为 draft 的 Release，
+#      与 release.yml 的正式发布流程重复且互相干扰。
+#
+# 正式发布请使用 .github/workflows/release.yml（推送 vX.Y.Z 标签触发）：
+#   打标签 -> 构建 Android/Windows -> 签名 -> 发布 GitHub Release。
+#   投放客户端更新通道另由 scripts/update-channel/deploy-update-channel.ps1 手动执行。
+#
+# 如需恢复：把本文件改回 ci.yml，并补齐上述所有 secrets。
+
+name: CI
+on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'test.configs/**'
+      - '.vscode/'
+      - 'appcast.xml'
+  push:
+    branches:
+       - main
+       - dev
+       - android-fix-action-bug
+       - new-design-v2 
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.vscode/'
+      - 'appcast.xml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    permissions: write-all
+    if: "${{!contains(github.event.head_commit.message, 'release: version')}}"
+    with:
+      upload-artifact: ${{ github.event_name == 'push' }}
+      

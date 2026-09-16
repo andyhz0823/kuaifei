@@ -9,7 +9,7 @@
 #     https://github.com/o/r/releases/download/v4.1.14 \
 #     Kuaifei-v4.1.14-android-arm64-v8a.apk ... SHA256SUMS.txt
 #
-# 由 .github/scripts/publish_update_channel.sh 通过 ssh 调用，一般不单独运行。
+# 由同目录的 deploy-update-channel.ps1 通过 ssh 上传到服务器后调用，一般不单独运行。
 set -euo pipefail
 
 TAG="${1:?tag required}"
