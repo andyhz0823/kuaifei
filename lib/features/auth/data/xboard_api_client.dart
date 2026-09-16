@@ -330,17 +330,57 @@ class XboardApiClient with InfraLogger {
       expireAt: intOrNull(data['expired_at'] ?? data['expire_at'] ?? data['expire']),
     );
 
-    return XboardSubscribeResult(
-      subscribeUrl: fallbackProfile.subscribeUrl,
-      subscriptions: subscriptions.isNotEmpty
-          ? subscriptions
-          : [if (fallbackProfile.subscribeUrl.isNotEmpty) fallbackProfile],
-      planId: intOrNull(data['plan_id']),
-      expiredAt: data['expired_at']?.toString() ?? data['expire_at']?.toString(),
-      email: data['email']?.toString(),
-      token: data['token']?.toString(),
-      appConfig: XboardAppConfig.fromJson(data['client_config'] ?? data['app_config']),
-    );
+      return XboardSubscribeResult(
+        subscribeUrl: fallbackProfile.subscribeUrl,
+        subscriptions: subscriptions.isNotEmpty
+            ? subscriptions
+            : [if (fallbackProfile.subscribeUrl.isNotEmpty) fallbackProfile],
+        planId: intOrNull(data['plan_id']),
+        expiredAt: data['expired_at']?.toString() ?? data['expire_at']?.toString(),
+        email: data['email']?.toString(),
+        token: data['token']?.toString(),
+        appConfig: XboardAppConfig.fromJson(data['client_config'] ?? data['app_config']),
+        entitlement: XboardEntitlement.fromJson(data['entitlement']),
+      );
+  }
+
+  /// 上报设备指纹与本机累计用量。
+  ///
+  /// 面板据此统计「同时在线设备数」（去重）并累加该套餐的已用流量。
+  /// 累计值幂等：只计增量，重复上报同一累计值不会重复扣费。
+  /// 返回面板最新的授权判定（可能因刚登记导致设备数超限）。
+  Future<XboardEntitlement?> clientReport({
+    required String deviceId,
+    String? deviceName,
+    String? platform,
+    String? appVersion,
+    int upload = 0,
+    int download = 0,
+  }) async {
+    try {
+      final response = await _requestWithOriginFallback(
+        (dio, cancelToken) => dio.post(
+          '/api/v1/user/clientReport',
+          cancelToken: cancelToken,
+          data: {
+            'device_id': deviceId,
+            if (deviceName != null && deviceName.isNotEmpty) 'device_name': deviceName,
+            if (platform != null && platform.isNotEmpty) 'platform': platform,
+            if (appVersion != null && appVersion.isNotEmpty) 'app_version': appVersion,
+            'upload': upload,
+            'download': download,
+          },
+        ),
+      );
+
+      final body = _responseBody(response);
+      if (body == null || body['status'] != 'success') return null;
+      final data = body['data'] as Map<String, dynamic>?;
+      return XboardEntitlement.fromJson(data?['entitlement'] ?? data);
+    } catch (error) {
+      loggy.debug('clientReport failed: $error');
+      return null;
+    }
   }
 
   static int? intOrNull(dynamic value) {
@@ -476,6 +516,7 @@ class XboardSubscribeResult {
   final String? email;
   final String? token;
   final XboardAppConfig appConfig;
+  final XboardEntitlement entitlement;
 
   XboardSubscribeResult({
     required this.subscribeUrl,
@@ -485,7 +526,42 @@ class XboardSubscribeResult {
     this.email,
     this.token,
     required this.appConfig,
+    required this.entitlement,
   });
+}
+
+/// 面板下发的授权判定结果。
+///
+/// 面板支持「外部订阅」，节点的到期/用量由第三方面板提供、本面板无从知晓，
+/// 所以授权以本面板的套餐记录为准，通过 [allowed] + [reason] 下发。
+/// 客户端据此决定是否删除本地已缓存配置、弹哪种提示、并跳转到「关于」页续费。
+class XboardEntitlement {
+  final bool allowed;
+  final String? reason;
+  final String message;
+  final int deviceLimit;
+  final int activeDevices;
+
+  const XboardEntitlement({
+    required this.allowed,
+    this.reason,
+    this.message = '',
+    this.deviceLimit = 0,
+    this.activeDevices = 0,
+  });
+
+  factory XboardEntitlement.fromJson(dynamic value) {
+    if (value is! Map) return const XboardEntitlement(allowed: true);
+    final json = Map<String, dynamic>.from(value);
+    final reason = json['reason']?.toString();
+    return XboardEntitlement(
+      allowed: json['allowed'] == true,
+      reason: reason,
+      message: json['message']?.toString() ?? '',
+      deviceLimit: XboardApiClient.intOrNull(json['device_limit']) ?? 0,
+      activeDevices: XboardApiClient.intOrNull(json['active_devices']) ?? 0,
+    );
+  }
 }
 
 class XboardSubscriptionProfile {

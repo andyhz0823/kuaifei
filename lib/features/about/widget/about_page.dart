@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:hiddify/core/app_info/app_info_provider.dart';
-import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/core/router/dialog/dialog_notifier.dart';
 import 'package:hiddify/features/app_update/notifier/app_update_notifier.dart';
 import 'package:hiddify/features/app_update/notifier/app_update_state.dart';
@@ -109,7 +108,7 @@ class AboutPage extends HookConsumerWidget {
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
-                  onPressed: () => UriUtils.tryLaunch(Uri.parse(Constants.purchaseUrl)),
+                  onPressed: () => UriUtils.tryLaunch(Uri.parse(auth.purchaseUrl)),
                   icon: const Icon(Icons.shopping_cart_outlined),
                   label: const Text('\u8ba2\u9605\u3001\u7eed\u8d39\u8d2d\u4e70'),
                 ),

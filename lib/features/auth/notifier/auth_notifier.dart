@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:drift/drift.dart';
 import 'package:hiddify/core/app_info/app_info_provider.dart';
@@ -10,6 +11,8 @@ import 'package:hiddify/core/directories/directories_provider.dart';
 import 'package:hiddify/core/http_client/tkya_origin.dart';
 import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/core/preferences/preferences_provider.dart';
+import 'package:hiddify/core/router/dialog/dialog_notifier.dart';
+import 'package:hiddify/core/router/go_router/go_router_notifier.dart';
 import 'package:hiddify/features/auth/data/origin_dns_bootstrap.dart';
 import 'package:hiddify/features/auth/data/xboard_api_client.dart';
 import 'package:hiddify/features/profile/data/profile_data_providers.dart';
@@ -20,6 +23,7 @@ import 'package:hiddify/utils/custom_loggers.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:go_router/go_router.dart';
 
 enum AuthStatus { idle, loading, authenticated, error }
 
@@ -59,6 +63,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   String? _readSubscribeUrl() => _prefs.getString('auth_subscribe_url');
   String? _readSubscribeProfiles() => _prefs.getString('auth_subscribe_profiles');
   String? _readEmail() => _prefs.getString('auth_email');
+  String? _readDeviceId() => _prefs.getString('auth_device_id');
 
   String? get panelUrl => _readPanelUrl();
   String? get email => _readEmail();
@@ -128,6 +133,17 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       await _writePreference('auth_subscription_token', loginResult.subscriptionToken);
       await _writePreference('auth_email', email);
       await _persistSubscribeResult(subscribeResult);
+
+      // 授权守卫：套餐过期 / 流量用尽 / 超设备数时，拒绝下发配置、删除本地缓存、
+      // 提示并引导到「关于」页续费。面板未下发 entitlement（旧版/异常）时视为放行。
+      final entitlement = subscribeResult.entitlement;
+      if (!entitlement.allowed) {
+        loggy.info('Auth: entitlement denied for $email (reason=${entitlement.reason})');
+        await _enforceEntitlementDenied(entitlement);
+      } else {
+        // 授权通过：上报本机设备指纹与累计用量，供面板统计在线设备数、累加流量
+        unawaited(_reportClientUsage(client));
+      }
 
       // Authentication is complete once credentials and subscription metadata
       // are durable. Profile downloads can be slow and must run in background.
@@ -263,6 +279,78 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     _profileRefreshTimer = Timer.periodic(_profileRefreshInterval, (_) => unawaited(_refreshSubscriptionProfiles()));
   }
 
+  /// 授权不通过：删除本地已缓存的订阅配置 + 弹提示 + 跳转到「关于」页。
+  Future<void> _enforceEntitlementDenied(XboardEntitlement entitlement) async {
+    await clearLocalProfileData();
+    await _removePreference('auth_subscribe_profiles');
+    await _removePreference('auth_subscribe_url');
+
+    final message = entitlement.message.isNotEmpty
+        ? entitlement.message
+        : switch (entitlement.reason) {
+            'subscription_expired' => '您的订阅已到过期',
+            'traffic_exhausted' => '您的套餐流量已用完',
+            'device_limit_exceeded' => '您已超过设备数限制',
+            _ => '当前套餐不可用，请续费购买',
+          };
+
+    final dialogNotifier = ref.read(dialogNotifierProvider.notifier);
+    await dialogNotifier.showOk('套餐状态', message);
+
+    final context = rootNavKey.currentContext;
+    if (context != null) {
+      context.go('/about');
+    }
+  }
+
+  /// 上报设备指纹与本机累计用量（幂等，只计增量）。
+  Future<void> _reportClientUsage(XboardApiClient client) async {
+    try {
+      final deviceId = await _ensureDeviceId();
+      final appInfo = ref.read(appInfoProvider).requireValue;
+      final totals = await _localUsageTotals();
+      await client.clientReport(
+        deviceId: deviceId,
+        deviceName: appInfo.operatingSystem,
+        platform: appInfo.operatingSystem,
+        appVersion: appInfo.version,
+        upload: totals.$1,
+        download: totals.$2,
+      );
+    } catch (error) {
+      loggy.debug('Auth: client usage report failed', error);
+    }
+  }
+
+  /// 生成并持久化一个稳定设备标识。
+  Future<String> _ensureDeviceId() async {
+    final existing = _readDeviceId();
+    if (existing != null && existing.isNotEmpty) return existing;
+
+    final random = Random.secure();
+    final id = List.generate(32, (_) => random.nextInt(16).toRadixString(16)).join();
+    await _writePreference('auth_device_id', id);
+    return id;
+  }
+
+  /// 本机累计用量（上行, 下行），来自本地 profile 库里的 subscription-userinfo 汇总。
+  Future<(int, int)> _localUsageTotals() async {
+    try {
+      final db = ref.read(dbProvider);
+      final entries = await db.select(db.profileEntries).get();
+      var upload = 0;
+      var download = 0;
+      for (final entry in entries) {
+        upload += entry.upload ?? 0;
+        download += entry.download ?? 0;
+      }
+      return (upload, download);
+    } catch (error) {
+      loggy.debug('Auth: failed to read local usage totals', error);
+      return (0, 0);
+    }
+  }
+
   Future<void> _refreshBootstrapConfig() async {
     if (_originRefreshInFlight) return;
     _originRefreshInFlight = true;
@@ -295,7 +383,17 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       final result = await client.getSubscribe().timeout(_loginTimeout);
       final changed = await _persistOriginDns(result);
       await _persistSubscribeResult(result);
-      await _syncStoredSubscriptionsToProfiles(removeObsoleteProfiles: true);
+
+      // 周期刷新同样过授权闸门：一旦过期/超量/超设备，立即清配置并提示。
+      final entitlement = result.entitlement;
+      if (!entitlement.allowed) {
+        loggy.info('Auth: periodic refresh entitlement denied (reason=${entitlement.reason})');
+        await _enforceEntitlementDenied(entitlement);
+      } else {
+        await _syncStoredSubscriptionsToProfiles(removeObsoleteProfiles: true);
+        unawaited(_reportClientUsage(client));
+      }
+
       if (changed) _scheduleRefreshes();
     } catch (error, stackTrace) {
       loggy.warning('Auth: periodic subscription refresh failed; keeping existing profiles', error, stackTrace);

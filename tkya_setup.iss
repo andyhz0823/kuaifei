@@ -1,6 +1,6 @@
 [Setup]
 AppId={{6L903538-42B1-4596-G479-BJ779F21A65D}}
-AppVersion=1.0.2
+AppVersion=1.0.3
 AppName=Tkya
 AppPublisher=Tkya
 AppPublisherURL=https://github.com/andyhz0823/Xboard
@@ -8,8 +8,8 @@ AppSupportURL=https://github.com/andyhz0823/Xboard
 AppUpdatesURL=https://xz.tkya.cc.cd/Downloads/
 DefaultDirName={autopf64}\Tkya
 DisableProgramGroupPage=yes
-OutputDir=dist\1.0.2+10002
-OutputBaseFilename=tkya-1.0.2
+OutputDir=dist\1.0.3+10003
+OutputBaseFilename=tkya-1.0.3
 Compression=lzma
 SolidCompression=yes
 SetupIconFile=windows\runner\resources\app_icon.ico
@@ -18,12 +18,12 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 CloseApplications=force
-VersionInfoVersion=1.0.2.0
-VersionInfoProductVersion=1.0.2.0
+VersionInfoVersion=1.0.3.0
+VersionInfoProductVersion=1.0.3.0
 VersionInfoDescription=Tkya
 VersionInfoProductName=Tkya
 VersionInfoCompany=Tkya
-VersionInfoOriginalFileName=tkya-1.0.2.exe
+VersionInfoOriginalFileName=tkya-1.0.3.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
