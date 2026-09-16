@@ -284,6 +284,8 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     await clearLocalProfileData();
     await _removePreference('auth_subscribe_profiles');
     await _removePreference('auth_subscribe_url');
+    // 让活动 profile 的 StreamProvider 从删除后的 DB 状态重建，避免 UI 残留指向已删配置的引用
+    ref.invalidate(activeProfileProvider);
 
     final message = entitlement.message.isNotEmpty
         ? entitlement.message
