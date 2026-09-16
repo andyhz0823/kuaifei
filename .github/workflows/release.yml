@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag, for example v4.1.12
+        description: Existing release tag, for example v4.1.11
         required: true
-        default: v4.1.12
+        default: v4.1.11
         type: string
       publish:
         description: Publish a GitHub Release with Sigstore keyless signatures
@@ -104,6 +104,12 @@ jobs:
           distribution: zulu
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          # Google removed the legacy "tools" package from the SDK repository, so the
+          # action default "tools platform-tools" now fails with
+          # "Failed to find package 'tools'". The runner image already ships the full
+          # Android SDK, so platform-tools is enough here.
+          packages: 'platform-tools'
       - name: Restore Android release signing key
         if: needs.preflight.outputs.android_signing_ready == 'true'
         shell: bash
@@ -272,3 +278,25 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: out/*
+
+  # 把已发布的 Release 投放到客户端更新通道（xz.kuaity.top/Downloads）：
+  # 目标服务器直连 GitHub 拉取产物并做 SHA-256 校验，再取回三份清单。
+  # 未配置 DEPLOY_SSH_KEY 时此 job 只打印提示并安全跳过。
+  deploy-channel:
+    needs: [preflight, publish]
+    if: needs.preflight.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Deploy release to client update channel
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          CHANNEL_BASE_URL: ${{ secrets.CHANNEL_BASE_URL }}
+        run: bash .github/scripts/publish_update_channel.sh

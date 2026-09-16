@@ -3,14 +3,20 @@
   <channel>
     <title>Kuaifei Release</title>
     <item>
-      <title>Version 4.1.8</title>
-      <pubDate>Sun, 26 Jul 2026 00:00:00 +0000</pubDate>
-      <enclosure url="https://xz.kuaity.top/Downloads/Kuaifei-v4.1.8-android-arm64-v8a.apk" sparkle:version="4.1.8" sparkle:os="android" />
+      <title>Version 4.1.14+40116</title>
+      <pubDate>Wed, 16 Sep 2026 13:53:25 GMT</pubDate>
+      <enclosure
+        url="https://xz.kuaity.top/Downloads/Kuaifei-v4.1.14-android-arm64-v8a.apk"
+        sparkle:version="4.1.14+40116" sparkle:shortVersionString="4.1.14" sparkle:os="android"
+        sparkle:length="119540199" />
     </item>
     <item>
-      <title>Version 4.1.8</title>
-      <pubDate>Sun, 26 Jul 2026 00:00:00 +0000</pubDate>
-      <enclosure url="https://xz.kuaity.top/Downloads/Kuaifei-v4.1.8-windows-x64-setup.exe" sparkle:version="4.1.8" sparkle:os="windows" />
+      <title>Version 4.1.14+40116</title>
+      <pubDate>Wed, 16 Sep 2026 13:53:25 GMT</pubDate>
+      <enclosure
+        url="https://xz.kuaity.top/Downloads/kuaifei-4.1.14.exe"
+        sparkle:version="4.1.14+40116" sparkle:shortVersionString="4.1.14" sparkle:os="windows"
+        sparkle:length="37123611" />
     </item>
   </channel>
 </rss>
