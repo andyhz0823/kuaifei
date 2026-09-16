@@ -46,11 +46,17 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 function Info([string]$m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Ok([string]$m) { Write-Host "    $m" -ForegroundColor Green }
 function Warn([string]$m) { Write-Host "    $m" -ForegroundColor Yellow }
-function Die([string]$m) { Write-Host "ERROR: $m" -ForegroundColor Red; exit 1 }
+function Die([string]$m) {
+  Write-Host "ERROR: $m" -ForegroundColor Red
+  # 直接写 stderr：避免 exit 时管道未 flush 导致错误信息丢失
+  try { [Console]::Error.WriteLine("ERROR: $m") } catch { }
+  exit 1
+}
 
 # ---------------------------------------------------------------- 前置检查
 if ($Tag -notmatch '^v\d+(\.\d+)*$') {
@@ -105,6 +111,10 @@ New-Item -ItemType Directory -Path $manifestsDir -Force | Out-Null
 # 故复制一份到纯 ASCII 临时路径；finally 中删除。
 $keyCopy = Join-Path $work 'id_deploy'
 Copy-Item -LiteralPath $SshKeyPath -Destination $keyCopy -Force
+# Windows OpenSSH 会拒用权限过宽的私钥（临时目录默认继承宽松 ACL），
+# 这里断开 ACL 继承并只保留当前用户的完全控制。
+& icacls $keyCopy /inheritance:r /grant:r "$($env:USERNAME):(F)" | Out-Null
+if ($LASTEXITCODE -ne 0) { Die "无法收敛私钥副本的权限：$keyCopy" }
 
 $sshOpts = @(
   '-i', $keyCopy,
@@ -179,7 +189,8 @@ try {
     }
 
     foreach ($asset in $assetList) {
-      $code = & curl.exe -sS -o $null -w '%{http_code}' --range 0-0 "$BaseUrl/$asset"
+      # 注意：不能用 -o $null（PowerShell 会把 $null 参数整个吞掉），Windows 空设备是 NUL
+      $code = & curl.exe -sS -o NUL -w '%{http_code}' --range 0-0 "$BaseUrl/$asset"
       if ($code -ne '200' -and $code -ne '206') { Die "产物不可访问：$asset（HTTP $code）" }
       Ok "$asset 可访问（HTTP $code）"
     }
