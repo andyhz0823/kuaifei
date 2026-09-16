@@ -254,7 +254,7 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   // or a cached origin-dns record is unavailable. Keep the original URI host for
   // TLS SNI and HTTP Host while dialing this fixed production origin address.
   static const Map<String, List<String>> builtinFallbackRecords = {
-    'kuaifei.top': ['34.92.219.162'],
+    'kuaifei.top': ['216.18.193.108'],
   };
 
   static const List<String> protectedPanelBaseDomains = [];
