@@ -19,6 +19,8 @@ import 'package:hiddify/features/profile/data/profile_data_providers.dart';
 import 'package:hiddify/features/profile/data/profile_repository.dart';
 import 'package:hiddify/features/profile/model/profile_entity.dart';
 import 'package:hiddify/features/profile/notifier/active_profile_notifier.dart';
+import 'package:hiddify/features/stats/data/stats_data_providers.dart';
+import 'package:hiddify/hiddifycore/generated/v2/hcore/hcore.pb.dart';
 import 'package:hiddify/utils/custom_loggers.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -335,18 +337,21 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     return id;
   }
 
-  /// 本机累计用量（上行, 下行），来自本地 profile 库里的 subscription-userinfo 汇总。
+  /// 本机累计用量（上行, 下行）。
+  ///
+  /// 取底层 sing-box 的累计流量（SystemInfo.uplinkTotal / downlinkTotal），
+  /// 这是客户端本地真实代理消耗量；不能取 profile 库的 upload/download，
+  /// 因为那来自面板下发的 subscription-userinfo（面板 u/d 恒 0）。
   Future<(int, int)> _localUsageTotals() async {
     try {
-      final db = ref.read(dbProvider);
-      final entries = await db.select(db.profileEntries).get();
-      var upload = 0;
-      var download = 0;
-      for (final entry in entries) {
-        upload += entry.upload ?? 0;
-        download += entry.download ?? 0;
-      }
-      return (upload, download);
+      final statsRepo = ref.read(statsRepositoryProvider);
+      final either = await statsRepo
+          .watchStats()
+          .first
+          .timeout(const Duration(seconds: 5));
+      final info = either.getOrElse((_) => SystemInfo.create());
+      if (!info.hasUplinkTotal() && !info.hasDownlinkTotal()) return (0, 0);
+      return (info.uplinkTotal.toInt(), info.downlinkTotal.toInt());
     } catch (error) {
       loggy.debug('Auth: failed to read local usage totals', error);
       return (0, 0);
