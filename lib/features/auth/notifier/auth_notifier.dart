@@ -41,18 +41,35 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   static const _legacyContactEmail = 'mahiya562@gmail.com';
   static const _profileRefreshInterval = Duration(minutes: 30);
   static const _profileSyncRetryDelay = Duration(seconds: 2);
+
+  /// 用量落盘 + 上报周期。
+  ///
+  /// 这个值不能大：sing-box 的 uplinkTotal/downlinkTotal 是**进程内内存计数**
+  /// （见 sing-box common/trafficcontrol/manager.go：closedUploadTotal 为纯
+  /// int64 累加、无任何持久化），客户端一旦退出就归零。只有周期性把读数落盘，
+  /// 才能在下次启动时把上一段用量结转回来，避免退出前那几分钟的流量永久丢失。
+  static const _usageFlushInterval = Duration(minutes: 5);
+
+  /// 本地用量基线（跨会话结转），落盘于 SharedPreferences。
+  static const _kUsageCarryUp = 'auth_usage_carry_up';
+  static const _kUsageCarryDown = 'auth_usage_carry_down';
+  static const _kUsageSessionUp = 'auth_usage_session_up';
+  static const _kUsageSessionDown = 'auth_usage_session_down';
+
   Timer? _originRefreshTimer;
   Timer? _profileRefreshTimer;
+  Timer? _usageFlushTimer;
   bool _originRefreshInFlight = false;
   bool _profileRefreshInFlight = false;
 
   @override
   Future<AuthStatus> build() async {
     TkyaOrigin.restore(_prefs);
-    ref.onDispose(() {
-      _originRefreshTimer?.cancel();
-      _profileRefreshTimer?.cancel();
-    });
+      ref.onDispose(() {
+        _originRefreshTimer?.cancel();
+        _profileRefreshTimer?.cancel();
+        _usageFlushTimer?.cancel();
+      });
     // Don't auto-login on startup - show the login page, let user click login
     return AuthStatus.idle;
   }
@@ -275,10 +292,12 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   void _scheduleRefreshes() {
     _originRefreshTimer?.cancel();
     _profileRefreshTimer?.cancel();
+    _usageFlushTimer?.cancel();
 
     final originInterval = TkyaOrigin.config.bootstrapRefreshInterval;
     _originRefreshTimer = Timer.periodic(originInterval, (_) => unawaited(_refreshBootstrapConfig()));
     _profileRefreshTimer = Timer.periodic(_profileRefreshInterval, (_) => unawaited(_refreshSubscriptionProfiles()));
+    _usageFlushTimer = Timer.periodic(_usageFlushInterval, (_) => unawaited(_flushClientUsage()));
   }
 
   /// 授权不通过：删除本地已缓存的订阅配置 + 弹提示 + 跳转到「关于」页。
@@ -321,10 +340,31 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
         upload: totals.$1,
         download: totals.$2,
       );
-    } catch (error) {
-      loggy.debug('Auth: client usage report failed', error);
+      } catch (error) {
+        loggy.debug('Auth: client usage report failed', error);
+      }
     }
-  }
+
+    /// 周期性落盘并上报本机用量（独立于 30 分钟订阅刷新）。
+    ///
+    /// 订阅刷新是一次完整 getSubscribe：慢，且授权被拒时会走清理分支而跳过上报。
+    /// 用量上报必须独立且高频——它唯一的职责是把当前内存计数写进磁盘并交给面板，
+    /// 否则进程一旦退出，上次落盘之后的用量就随内存计数一起消失了。
+    Future<void> _flushClientUsage() async {
+      final savedPanelUrl = panelUrl;
+      final token = sanctumToken;
+      if (savedPanelUrl == null || token == null || token.isEmpty) return;
+      try {
+        final client = XboardApiClient(
+          baseUrl: savedPanelUrl,
+          userAgent: ref.read(appInfoProvider).requireValue.userAgent,
+          preferences: _prefs,
+        )..setToken(token);
+        await _reportClientUsage(client);
+      } catch (error) {
+        loggy.debug('Auth: periodic usage flush failed', error);
+      }
+    }
 
   /// 生成并持久化一个稳定设备标识。
   Future<String> _ensureDeviceId() async {
@@ -337,21 +377,52 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     return id;
   }
 
-  /// 本机累计用量（上行, 下行）。
+  /// 本机累计用量（上行, 下行）——跨会话单调累计，随读随落盘。
   ///
-  /// 取底层 sing-box 的累计流量（SystemInfo.uplinkTotal / downlinkTotal），
-  /// 这是客户端本地真实代理消耗量；不能取 profile 库的 upload/download，
-  /// 因为那来自面板下发的 subscription-userinfo（面板 u/d 恒 0）。
+  /// 取底层 sing-box 的累计流量（SystemInfo.uplinkTotal / downlinkTotal）；
+  /// 不能取 profile 库的 upload/download，那来自面板下发的 subscription-userinfo
+  /// （面板 u/d 恒 0，本地真实代理消耗量从不在里面）。
+  ///
+  /// 关键：uplinkTotal 是**进程内内存计数**，sing-box 服务重启或客户端退出后归零。
+  /// 若直接上报会话内读数，面板 deltaFor(reported, stored) 在 reported < stored 时
+  /// 记 0，于是每次重启后都必须重新爬升到历史峰值才开始计费，流量会持续丢失。
+  ///
+  /// 因此在本地（SharedPreferences，落盘）维护两个量：
+  ///   - carry：历史会话已结转的累计和（不含当前会话）
+  ///   - session：上一次读到的会话内读数（用于识别计数回退）
+  /// 读到 cur < session 即判定服务已重启，把上一次会话终值并入 carry。
+  /// 上报值 = carry + cur，保证单调不减。
+  ///
+  /// 落盘不等上报结果：本地累计是本地事实，上报失败时应保留，下次用更大的值补报。
   Future<(int, int)> _localUsageTotals() async {
     try {
       final statsRepo = ref.read(statsRepositoryProvider);
-      final either = await statsRepo
-          .watchStats()
-          .first
-          .timeout(const Duration(seconds: 5));
+      final either = await statsRepo.watchStats().first.timeout(const Duration(seconds: 5));
       final info = either.getOrElse((_) => SystemInfo.create());
+
+      // 拿不到真实读数（代理服务未运行 / 流无数据）时，既不能上报、也不能落盘：
+      // 此时 curUp 会是 0，若照常走「回退判定」会被误认为服务重启，
+      // 把上一次会话的终值重复并进 carry，导致用量被翻倍计入。
       if (!info.hasUplinkTotal() && !info.hasDownlinkTotal()) return (0, 0);
-      return (info.uplinkTotal.toInt(), info.downlinkTotal.toInt());
+
+      final curUp = info.hasUplinkTotal() ? info.uplinkTotal.toInt() : 0;
+      final curDown = info.hasDownlinkTotal() ? info.downlinkTotal.toInt() : 0;
+
+      final carryUp = _prefs.getInt(_kUsageCarryUp) ?? 0;
+      final carryDown = _prefs.getInt(_kUsageCarryDown) ?? 0;
+      final sessUp = _prefs.getInt(_kUsageSessionUp) ?? 0;
+      final sessDown = _prefs.getInt(_kUsageSessionDown) ?? 0;
+
+      // 计数回退 => 服务/进程已重启，把上一会话的终值结转进 carry。
+      final nextCarryUp = curUp < sessUp ? carryUp + sessUp : carryUp;
+      final nextCarryDown = curDown < sessDown ? carryDown + sessDown : carryDown;
+
+      await _prefs.setInt(_kUsageCarryUp, nextCarryUp);
+      await _prefs.setInt(_kUsageCarryDown, nextCarryDown);
+      await _prefs.setInt(_kUsageSessionUp, curUp);
+      await _prefs.setInt(_kUsageSessionDown, curDown);
+
+      return (nextCarryUp + curUp, nextCarryDown + curDown);
     } catch (error) {
       loggy.debug('Auth: failed to read local usage totals', error);
       return (0, 0);
@@ -668,6 +739,12 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     await _removePreference('auth_subscribe_url');
     await _removePreference('auth_subscribe_profiles');
     await _removePreference('auth_email');
+    // 用量基线必须随账号一起清零：device_id 是跨账号保留的，若把上一个账号的
+    // 累计量带进新账号，新账号的设备行 reported_* 从 0 起算，会把旧用量整段扣到新账号上。
+    await _removePreference(_kUsageCarryUp);
+    await _removePreference(_kUsageCarryDown);
+    await _removePreference(_kUsageSessionUp);
+    await _removePreference(_kUsageSessionDown);
 
     await clearLocalProfileData();
 

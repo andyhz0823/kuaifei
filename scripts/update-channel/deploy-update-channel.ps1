@@ -16,15 +16,15 @@
   产物不经过本机中转（服务器直连 GitHub 下载），本机只传 KB 级清单。
 
 .PARAMETER Tag
-  Release 标签，例如 v1.0.4。
+  Release 标签，例如 v1.0.3。
 
 .EXAMPLE
   # 推荐：私钥路径走环境变量，避免把本机路径写进脚本
   $env:TKYA_DEPLOY_SSH_KEY = 'D:\path\to\deploy.pem'
-  .\deploy-update-channel.ps1 -Tag v1.0.4
+  .\deploy-update-channel.ps1 -Tag v1.0.3
 
 .EXAMPLE
-  .\deploy-update-channel.ps1 -Tag v1.0.4 -SshKeyPath 'C:\keys\deploy.pem' -SkipVerify
+  .\deploy-update-channel.ps1 -Tag v1.0.3 -SshKeyPath 'C:\keys\deploy.pem' -SkipVerify
 #>
 [CmdletBinding()]
 param(
@@ -60,7 +60,7 @@ function Die([string]$m) {
 
 # ---------------------------------------------------------------- 前置检查
 if ($Tag -notmatch '^v\d+(\.\d+)*$') {
-  Die "标签格式不合法：$Tag（应形如 v1.0.4）"
+  Die "标签格式不合法：$Tag（应形如 v1.0.3）"
 }
 if ([string]::IsNullOrWhiteSpace($SshKeyPath)) {
   Die @"

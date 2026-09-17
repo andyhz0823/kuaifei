@@ -15,7 +15,7 @@
 
 注意：flutter 的 version 包比较版本时忽略 build 元数据
 （version-3.0.2/lib/version.dart:200-217 只比 major/minor/patch/preRelease），
-因此 appcast.xml 的 sparkle:version 必须写成 "1.0.4+10004" 形式，
+因此 appcast.xml 的 sparkle:version 必须写成 "1.0.3+10003" 形式，
 对已装更早版本（例如 1.0.1）的用户才判定为有更新。
 """
 
@@ -124,7 +124,7 @@ def files_block(picked: dict[str, str | None], sums: dict[str, dict]) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tag", required=True, help="Release 标签，例如 v1.0.4")
+    ap.add_argument("--tag", required=True, help="Release 标签，例如 v1.0.3")
     ap.add_argument("--repo", required=True, help="owner/name")
     ap.add_argument("--base-url", required=True, help="分发基址，例如 https://xz.tkya.cc.cd/Downloads")
     ap.add_argument("--out", required=True, help="清单输出目录")
