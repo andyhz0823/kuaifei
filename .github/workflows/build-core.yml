@@ -24,6 +24,8 @@ jobs:
   build-core:
     name: Core / ${{ matrix.target }}
     runs-on: ubuntu-latest
+    # 防止 gomobile/NDK 卡死导致无限挂起（曾发生卡 8 小时不结束）
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

@@ -95,6 +95,9 @@ jobs:
   build-core:
     name: Core / ${{ matrix.target }}
     runs-on: ubuntu-latest
+    # 上报失败时不能无限挂起：gomobile/NDK 曾出现过卡死（8 小时不结束），
+    # 会把整个 Release 一起拖住。这里给它一个硬上限。
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
