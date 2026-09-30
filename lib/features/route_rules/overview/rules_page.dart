@@ -24,7 +24,7 @@ class RulesPage extends HookConsumerWidget {
           children: [
             const Icon(Icons.auto_awesome_rounded, size: 18),
             const Gap(8),
-            Text(routeRuleT.presets.title),
+            Text(_presetTitle),
           ],
         ),
       ),
@@ -133,7 +133,10 @@ class RulesPage extends HookConsumerWidget {
     );
   }
 
-  /// 预设面板说明文案。内置常量，理由同 RulePreset.name（避免 i18n 代码生成依赖）。
+  /// 预设菜单项与面板标题。内置常量，理由同 RulePreset.name（避免 i18n 代码生成依赖）。
+  static const _presetTitle = '规则预设';
+
+  /// 预设面板说明文案。
   static const _presetHint = '一键添加常用分流规则，添加后仍可编辑、排序或删除';
 
   IconData _iconFor(Outbound outbound) => switch (outbound) {
