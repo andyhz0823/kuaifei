@@ -1,28 +1,69 @@
 name: Build Core (custom routing rules)
 
-# 编译带「用户自定义分流规则」支持的 hiddify-core。
+# 编译带「用户自定义分流规则」支持的 hiddify-core，并把产物做内容寻址缓存。
 #
-# 背景：kuaifei/tkya 客户端的官方发布流程是从 hiddify/hiddify-next-core
-# 下载预编译 core（根 Makefile 的 windows-libs / android-libs 走 curl），
-# 因此对 hiddify-core/ 的源码改动不会被采用。
-# 本工作流从源码编译 core，产物名与官方分发保持一致（hiddify-lib-*.tar.gz），
-# 便于直接替换。
+# 为什么把 core 编译从发布流程里拆出来：
+#   1) 本仓库的 hiddify-core/ 是从上游扁平化复制的副本，历史上从未被编译过。
+#      首次从源码编译连续暴露了一串问题（缺 go:embed 数据文件、缺
+#      CRONET_GO_VERSION、缺 package.json、CLI 名与 CMakeLists 不匹配等），
+#      而这些问题原先被「下载预编译 core」长期掩盖。
+#   2) core 编译（尤其 gomobile/NDK 那条路）还偶发卡死，会把整个 Release 拖住。
+#
+# 所以：
+#   * 本文件负责「编译 + 缓存」：push 到 hiddify-core/** 自动预热，也可手动触发；
+#   * release.yml 通过 workflow_call 复用本文件，缓存命中时只做下载（秒级），
+#     发布流程不再受 core 编译波动影响。
+#
+# 缓存键 = `git rev-parse HEAD:hiddify-core`（core 子树的 tree SHA）。
+# core 源码任何改动都会得到新键，因此不会误用旧 core。
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     branches:
       - tkya-fenliu
     paths:
-      - 'hiddify-core/v2/config/**'
-      - 'hiddify-core/v2/hcore/**'
+      - 'hiddify-core/**'
       - '.github/workflows/build-core.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  resolve:
+    name: Resolve core cache key
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.key.outputs.tag }}
+      sha: ${{ steps.key.outputs.sha }}
+      cache_hit: ${{ steps.key.outputs.cache_hit }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: key
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD:hiddify-core)"
+          tag="core-cache-${sha}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "core cache HIT: $tag"
+            echo "cache_hit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "core cache MISS: $tag (需要编译)"
+            echo "cache_hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-core:
     name: Core / ${{ matrix.target }}
+    needs: resolve
+    if: needs.resolve.outputs.cache_hit != 'true'
     runs-on: ubuntu-latest
     # 防止 gomobile/NDK 卡死导致无限挂起（曾发生卡 8 小时不结束）
     timeout-minutes: 60
@@ -32,41 +73,34 @@ jobs:
         include:
           - target: windows-amd64
             artifact: hiddify-lib-windows-amd64
+            required: hiddify-core.dll libcronet.dll TkyaCli.exe
           - target: android
             artifact: hiddify-lib-android
+            required: hiddify-core.aar
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version-file: hiddify-core/go.mod
           check-latest: false
-
-      - name: Setup Java
-        if: matrix.target == 'android'
-        uses: actions/setup-java@v4
+      - if: matrix.target == 'android'
+        uses: actions/setup-java@v5
         with:
           distribution: zulu
           java-version: '17'
-
-      - name: Setup Android NDK
-        if: matrix.target == 'android'
+      - if: matrix.target == 'android'
         id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r28
-
-      - name: Setup MinGW
-        if: matrix.target == 'windows-amd64'
+      - if: matrix.target == 'windows-amd64'
         uses: egor-tensin/setup-mingw@v2
         with:
           platform: x64
 
-      # 编译前先做一次快速编译：把「自定义规则代码错误」和「仓库缺失 go:embed 文件」
+      # 编译前先做一次快速编译：把「自定义规则代码错误」「仓库缺失 go:embed 文件」
       # 这类问题在完整构建（含 cronet 下载，很慢）之前就暴露出来。
       # 用 go build 而不是 go vet —— 上游代码本身带有一批 vet 警告
       # （unreachable code / non-constant format string），vet 会把它们当失败。
@@ -87,9 +121,26 @@ jobs:
 
       - name: Package
         working-directory: hiddify-core/bin
+        env:
+          REQUIRED: ${{ matrix.required }}
         run: |
           set -euo pipefail
           ls -la
+          # 硬校验：core 打包缺文件曾经静默通过（libcronet.dll 未被提取，
+          # 而 make 并不报错），直到 Windows 端 CMake install 才失败，
+          # 排查代价很高。这里前置拦住，并打印实际目录内容。
+          missing=0
+          for f in $REQUIRED; do
+            if ! find . -name "$f" | grep -q .; then
+              echo "::error::core 产物缺少必需文件：$f"
+              missing=1
+            fi
+          done
+          if [ "$missing" != "0" ]; then
+            echo "--- bin 目录实际内容 ---"
+            find . -type f | sort
+            exit 1
+          fi
           files=$(find . \( -name "hiddify-core.dll" \
                 -o -name "libcronet.dll" \
                 -o -name "hiddify-core.aar" \
@@ -97,9 +148,75 @@ jobs:
           echo "packing: $files"
           tar -czvf "../${{ matrix.artifact }}.tar.gz" $files
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: hiddify-core/${{ matrix.artifact }}.tar.gz
           if-no-files-found: error
+
+  fetch-core:
+    name: Fetch cached core / ${{ matrix.target }}
+    needs: resolve
+    if: needs.resolve.outputs.cache_hit == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: hiddify-lib-windows-amd64
+          - artifact: hiddify-lib-android
+    steps:
+      - name: Download cached core
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CACHE_TAG: ${{ needs.resolve.outputs.tag }}
+          ARTIFACT: ${{ matrix.artifact }}
+        run: |
+          set -euo pipefail
+          mkdir -p core-dist
+          gh release download "$CACHE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "${ARTIFACT}.tar.gz" \
+            --dir core-dist
+          ls -la core-dist
+      # 重新上传为本次 run 的 artifact，下游 download-artifact 无需改动
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: core-dist/${{ matrix.artifact }}.tar.gz
+          if-no-files-found: error
+
+  publish-cache:
+    name: Publish core cache
+    needs: [resolve, build-core]
+    if: needs.resolve.outputs.cache_hit != 'true' && needs.build-core.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hiddify-lib-*
+          path: cache-dist
+      - name: Publish cache release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CACHE_TAG: ${{ needs.resolve.outputs.tag }}
+          CORE_SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          ls -la cache-dist
+          notes="hiddify-core 编译缓存（内容寻址，core 子树 SHA: ${CORE_SHA}）。仅供 CI 复用，不是客户端发布包。"
+          if gh release view "$CACHE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$CACHE_TAG" cache-dist/*.tar.gz \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$CACHE_TAG" cache-dist/*.tar.gz \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "core cache ${CORE_SHA:0:12}" \
+              --notes "$notes" \
+              --prerelease
+          fi

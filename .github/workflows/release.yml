@@ -89,68 +89,20 @@ jobs:
           fi
           echo "Sigstore keyless signing is enabled; no Azure Trusted Signing secrets are required."
 
-  # 从源码编译 hiddify-core（带用户自定义分流规则支持）。
-  # 官方流程是从 hiddify-next-core 下载预编译 core，那样对 hiddify-core/ 的源码改动
-  # 不会生效，所以这里改为自编译并分发给下面的打包 job。
+  # core 由独立的 build-core.yml 编译，并以「内容寻址的 Release 资产」缓存
+  # （tag: core-cache-<hiddify-core 子树 SHA>）。
+  #
+  # 这里通过 workflow_call 复用：
+  #   * 缓存命中 → 只下载资产（秒级），发布流程完全不受 core 编译波动影响；
+  #   * 缓存缺失 → 在本 run 内编译一次并回写缓存，后续发布即可秒级复用。
+  #
+  # 建议发布前先手动预热（Actions → "Build Core (custom routing rules)" → Run workflow），
+  # 这样即使 core 编译偶发卡死，也不会影响发布本身。
   build-core:
-    name: Core / ${{ matrix.target }}
-    runs-on: ubuntu-latest
-    # 上报失败时不能无限挂起：gomobile/NDK 曾出现过卡死（8 小时不结束），
-    # 会把整个 Release 一起拖住。这里给它一个硬上限。
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: windows-amd64
-            artifact: hiddify-lib-windows-amd64
-          - target: android
-            artifact: hiddify-lib-android
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: hiddify-core/go.mod
-          check-latest: false
-      - if: matrix.target == 'android'
-        uses: actions/setup-java@v5
-        with:
-          distribution: zulu
-          java-version: '17'
-      - if: matrix.target == 'android'
-        id: setup-ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r28
-      - if: matrix.target == 'windows-amd64'
-        uses: egor-tensin/setup-mingw@v2
-        with:
-          platform: x64
-      - name: Build core
-        working-directory: hiddify-core
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: |
-          set -euo pipefail
-          make prepare
-          make ${{ matrix.target }}
-      - name: Package core
-        working-directory: hiddify-core/bin
-        run: |
-          set -euo pipefail
-          files=$(find . \( -name "hiddify-core.dll" \
-                -o -name "libcronet.dll" \
-                -o -name "hiddify-core.aar" \
-                -o -name "TkyaCli.exe" \))
-          echo "packing: $files"
-          tar -czvf "../${{ matrix.artifact }}.tar.gz" $files
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: hiddify-core/${{ matrix.artifact }}.tar.gz
-          if-no-files-found: error
+    name: Core
+    uses: ./.github/workflows/build-core.yml
+    permissions:
+      contents: write
 
   build-android:
     needs: [preflight, build-core]
