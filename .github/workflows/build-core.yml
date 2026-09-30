@@ -64,13 +64,15 @@ jobs:
         with:
           platform: x64
 
-      # 编译前先做一次静态检查：把自定义规则的编译错误尽早暴露，
-      # 避免在完整构建（含 cronet 下载）里才发现。
-      - name: Vet custom routing rule support
+      # 编译前先做一次快速编译：把「自定义规则代码错误」和「仓库缺失 go:embed 文件」
+      # 这类问题在完整构建（含 cronet 下载，很慢）之前就暴露出来。
+      # 用 go build 而不是 go vet —— 上游代码本身带有一批 vet 警告
+      # （unreachable code / non-constant format string），vet 会把它们当失败。
+      - name: Compile check (custom routing rule support)
         working-directory: hiddify-core
         run: |
           set -euo pipefail
-          go vet ./v2/config/... ./v2/hcore/...
+          go build ./v2/config/... ./v2/hcore/...
 
       - name: Build core
         working-directory: hiddify-core
