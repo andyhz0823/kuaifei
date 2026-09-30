@@ -112,7 +112,7 @@ install(FILES "../hiddify-core/bin/lib/hiddify-core.so" DESTINATION "${INSTALL_B
   COMPONENT Runtime)
 
 install(
-  FILES "../hiddify-core/bin/HiddifyCli" 
+  FILES "../hiddify-core/bin/TkyaCli" 
   DESTINATION "${CMAKE_INSTALL_PREFIX}"
   PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_EXECUTE WORLD_READ
   COMPONENT Runtime
