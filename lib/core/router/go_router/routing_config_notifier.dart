@@ -16,6 +16,7 @@ import 'package:hiddify/features/profile/details/profile_details_page.dart';
 import 'package:hiddify/features/profile/notifier/active_profile_notifier.dart';
 import 'package:hiddify/features/profile/overview/profiles_page.dart';
 import 'package:hiddify/features/proxy/overview/proxies_overview_page.dart';
+import 'package:hiddify/features/route_rules/overview/rules_page.dart';
 import 'package:hiddify/features/settings/overview/sections/dns_options_page.dart';
 import 'package:hiddify/features/settings/overview/sections/general_page.dart';
 import 'package:hiddify/features/settings/overview/sections/inbound_options_page.dart';
@@ -179,14 +180,20 @@ class RoutingConfigNotifier extends _$RoutingConfigNotifier {
                       path: '/route-options',
                       pageBuilder: (_, state) =>
                           customTransition(TransitionType.slide, state.pageKey, const RouteOptionsPage()),
-                      routes: <GoRoute>[
-                        GoRoute(
-                          name: 'perAppProxy',
-                          path: '/per-app-proxy',
-                          pageBuilder: (_, state) =>
-                              customTransition(TransitionType.slide, state.pageKey, const PerAppProxyPage()),
-                        ),
-                      ],
+                        routes: <GoRoute>[
+                          GoRoute(
+                            name: 'perAppProxy',
+                            path: '/per-app-proxy',
+                            pageBuilder: (_, state) =>
+                                customTransition(TransitionType.slide, state.pageKey, const PerAppProxyPage()),
+                          ),
+                          GoRoute(
+                            name: 'routeRules',
+                            path: '/route-rules',
+                            pageBuilder: (_, state) =>
+                                customTransition(TransitionType.slide, state.pageKey, const RulesPage()),
+                          ),
+                        ],
                     ),
                     GoRoute(
                       name: 'dnsOptions',

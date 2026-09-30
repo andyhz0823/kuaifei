@@ -15,6 +15,7 @@ import (
 	"net"
 	_ "net/http/pprof"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	sync "sync"
@@ -75,6 +76,9 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) err
 
 	sWorkingPath = params.WorkingDir
 	os.Chdir(sWorkingPath)
+	// 用户自定义分流规则文件由客户端写在其 baseDir 下（与 params.BasePath 相同）。
+	// 注入路径后，构建配置时会读取并合并进路由规则（见 v2/config/user_route_rules.go）。
+	config.SetUserRouteRulesPath(filepath.Join(params.BasePath, "route_rule.proto"))
 	sTempPath = params.TempDir
 	sUserID = os.Getuid()
 	sGroupID = os.Getgid()

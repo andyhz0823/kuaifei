@@ -1,0 +1,101 @@
+name: Build Core (custom routing rules)
+
+# 编译带「用户自定义分流规则」支持的 hiddify-core。
+#
+# 背景：kuaifei/tkya 客户端的官方发布流程是从 hiddify/hiddify-next-core
+# 下载预编译 core（根 Makefile 的 windows-libs / android-libs 走 curl），
+# 因此对 hiddify-core/ 的源码改动不会被采用。
+# 本工作流从源码编译 core，产物名与官方分发保持一致（hiddify-lib-*.tar.gz），
+# 便于直接替换。
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - tkya-fenliu
+    paths:
+      - 'hiddify-core/v2/config/**'
+      - 'hiddify-core/v2/hcore/**'
+      - '.github/workflows/build-core.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-core:
+    name: Core / ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-amd64
+            artifact: hiddify-lib-windows-amd64
+          - target: android
+            artifact: hiddify-lib-android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: hiddify-core/go.mod
+          check-latest: false
+
+      - name: Setup Java
+        if: matrix.target == 'android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Setup Android NDK
+        if: matrix.target == 'android'
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r28
+
+      - name: Setup MinGW
+        if: matrix.target == 'windows-amd64'
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: x64
+
+      # 编译前先做一次静态检查：把自定义规则的编译错误尽早暴露，
+      # 避免在完整构建（含 cronet 下载）里才发现。
+      - name: Vet custom routing rule support
+        working-directory: hiddify-core
+        run: |
+          set -euo pipefail
+          go vet ./v2/config/... ./v2/hcore/...
+
+      - name: Build core
+        working-directory: hiddify-core
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          make prepare
+          make ${{ matrix.target }}
+
+      - name: Package
+        working-directory: hiddify-core/bin
+        run: |
+          set -euo pipefail
+          ls -la
+          files=$(find . \( -name "hiddify-core.dll" \
+                -o -name "libcronet.dll" \
+                -o -name "hiddify-core.aar" \
+                -o -name "TkyaCli.exe" \))
+          echo "packing: $files"
+          tar -czvf "../${{ matrix.artifact }}.tar.gz" $files
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: hiddify-core/${{ matrix.artifact }}.tar.gz
+          if-no-files-found: error

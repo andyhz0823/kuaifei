@@ -977,6 +977,11 @@ func setRoutingOptions(options *option.Options, hopt *HiddifyOptions) error {
 			},
 		})
 	}
+	// 追加用户自定义分流规则（由客户端「路由规则」界面维护，见 user_route_rules.go）。
+	// 放在内置规则之后：内置的 DNS / 私有地址 / 广告拦截等安全规则仍优先匹配，
+	// 未命中任何规则时由下方 Final 兜底走主代理。
+	routeRules = append(routeRules, LoadUserRouteRules()...)
+
 	options.Route = &option.RouteOptions{
 		Rules:               routeRules,
 		Final:               OutboundMainDetour,

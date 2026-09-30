@@ -22,6 +22,14 @@ class RouteOptionsPage extends HookConsumerWidget {
       appBar: AppBar(title: Text(t.pages.settings.routing.title)),
       body: ListView(
         children: [
+          // 自定义分流规则（按域名/域名后缀/IP 段/端口/协议/进程/应用包名分流）
+          ListTile(
+            title: Text(t.pages.settings.routing.routeRule.title),
+            leading: const Icon(Icons.rule_rounded),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => context.goNamed('routeRules'),
+          ),
+          const Divider(height: 1),
           if (PlatformUtils.isAndroid)
             ListTile(
               title: Text(t.pages.settings.routing.perAppProxy.title),
