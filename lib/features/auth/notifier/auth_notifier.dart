@@ -3,11 +3,13 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 import 'package:hiddify/core/app_info/app_info_provider.dart';
 import 'package:hiddify/core/db/db.dart';
 import 'package:hiddify/core/db/provider/db_providers.dart';
 import 'package:hiddify/core/directories/directories_provider.dart';
+import 'package:hiddify/core/http_client/http_client_provider.dart';
 import 'package:hiddify/core/http_client/tkya_origin.dart';
 import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/core/preferences/preferences_provider.dart';
@@ -61,6 +63,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   Timer? _usageFlushTimer;
   bool _originRefreshInFlight = false;
   bool _profileRefreshInFlight = false;
+
+  /// 上次已提示过的「节点源不可用」原因，避免周期性刷新重复弹窗。
+  String? _unavailableNotice;
 
   @override
   Future<AuthStatus> build() async {
@@ -588,6 +593,60 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     }
 
     loggy.info('Auth: successfully synced $successCount subscription profiles');
+
+    // 一条都没同步成功时，去问面板「为什么」。
+    // 面板在「本地无节点 + 上游外部订阅拒绝下发」时会返回 403 + JSON 原因
+    // （data.reason = no_available_nodes），把它显示出来，用户才知道该去续费、
+    // 还是该去上游换订阅链接，而不是只看到一句笼统的同步失败。
+    if (successCount == 0 && profiles.isNotEmpty) {
+      await _surfaceSubscriptionUnavailable(profiles);
+    } else if (successCount > 0) {
+      _unavailableNotice = null;
+    }
+  }
+
+  /// 把面板给出的「节点源不可用」原因提示给用户（同一原因只提示一次）。
+  Future<void> _surfaceSubscriptionUnavailable(Iterable<XboardSubscriptionProfile> profiles) async {
+    for (final profile in profiles) {
+      if (profile.subscribeUrl.isEmpty) continue;
+      final message = await _fetchUnavailableMessage(profile.subscribeUrl);
+      if (message == null || message.isEmpty) continue;
+      if (_unavailableNotice == message) return;
+      _unavailableNotice = message;
+      loggy.warning('Auth: subscription source unavailable: $message');
+      await ref.read(dialogNotifierProvider.notifier).showOk('节点源暂不可用', message);
+      return;
+    }
+  }
+
+  /// 读取订阅地址上服务端给出的不可用原因（403 JSON 的 message 字段）。
+  /// 正常 200 时返回 null。
+  Future<String?> _fetchUnavailableMessage(String url) async {
+    try {
+      await ref.read(httpClientProvider).get<dynamic>(url).timeout(const Duration(seconds: 10));
+
+      return null;
+    } catch (error) {
+      if (error is DioException) {
+        final data = error.response?.data;
+        final decoded = data is String
+            ? _tryDecodeJson(data)
+            : (data is Map ? data : null);
+        final message = decoded is Map ? decoded['message'] : null;
+        if (message is String && message.trim().isNotEmpty) return message.trim();
+      }
+      loggy.debug('Auth: failed to read subscription unavailable reason', error);
+
+      return null;
+    }
+  }
+
+  dynamic _tryDecodeJson(String raw) {
+    try {
+      return jsonDecode(raw);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<({XboardSubscriptionProfile profile, bool success, Object? failure})> _syncSubscriptionProfile(
