@@ -26,10 +26,15 @@ func SetUserRouteRulesPath(path string) {
 
 // LoadUserRouteRules 读取并转换用户规则。
 //
+// knownOutbound 用于校验规则绑定的自定义出站（outbound_tag）是否真实存在于当前配置：
+// 节点来自订阅，重订阅/换节点后 tag 可能消失或改名，指向不存在的 tag 会让整份配置
+// 校验失败（比规则失效严重得多），因此这里把未知 tag 回退成主出口，只丢失该条规则
+// 的定向能力，不影响其他规则与整体可用。传 nil 表示不做校验。
+//
 // 每次调用都重新读盘：规则由用户在界面随时增删，而本函数只在构建配置时调用
 // （启动 / 重载），频率很低，不引入缓存复杂度。
 // 文件缺失、为空或解析失败时返回 nil，不影响内置规则。
-func LoadUserRouteRules() []option.Rule {
+func LoadUserRouteRules(knownOutbound func(tag string) bool) []option.Rule {
 	if userRouteRulesPath == "" {
 		return nil
 	}
@@ -47,7 +52,7 @@ func LoadUserRouteRules() []option.Rule {
 		if r == nil || !r.Enabled {
 			continue
 		}
-		if converted := convertUserRule(r); converted != nil {
+		if converted := convertUserRule(r, knownOutbound); converted != nil {
 			rules = append(rules, *converted)
 		}
 	}
@@ -57,7 +62,10 @@ func LoadUserRouteRules() []option.Rule {
 // convertUserRule 把界面规则模型映射为 sing-box 规则。
 //
 // 没有任何匹配条件的规则返回 nil —— 否则会命中全部流量，把整条隧道带偏。
-func convertUserRule(r *Rule) *option.Rule {
+//
+// 出站取值的优先级：outbound_tag（用户指定的具体节点/策略组，且通过存在性校验）
+// > outbound 枚举（proxy/direct/direct_with_fragment/block）。
+func convertUserRule(r *Rule, knownOutbound func(tag string) bool) *option.Rule {
 	raw := option.RawDefaultRule{
 		Domain:          r.Domains,
 		DomainSuffix:    r.DomainSuffixes,
@@ -79,19 +87,26 @@ func convertUserRule(r *Rule) *option.Rule {
 	}
 
 	action := option.RuleAction{}
-	switch r.Outbound {
-	case Outbound_block:
-		action.Action = C.RuleActionTypeReject
-		action.RejectOptions = option.RejectActionOptions{Method: C.RuleActionRejectMethodDefault}
-	case Outbound_direct:
+	if tag := r.GetOutboundTag(); tag != "" && (knownOutbound == nil || knownOutbound(tag)) {
+		// 自定义出站：直指具体节点或 select/lowest/balance 策略组。
 		action.Action = C.RuleActionTypeRoute
-		action.RouteOptions = option.RouteActionOptions{Outbound: OutboundDirectTag}
-	case Outbound_direct_with_fragment:
-		action.Action = C.RuleActionTypeRoute
-		action.RouteOptions = option.RouteActionOptions{Outbound: OutboundDirectFragmentTag}
-	default: // Outbound_proxy
-		action.Action = C.RuleActionTypeRoute
-		action.RouteOptions = option.RouteActionOptions{Outbound: OutboundMainDetour}
+		action.RouteOptions = option.RouteActionOptions{Outbound: tag}
+	}
+	if action.Action == "" {
+		switch r.Outbound {
+		case Outbound_block:
+			action.Action = C.RuleActionTypeReject
+			action.RejectOptions = option.RejectActionOptions{Method: C.RuleActionRejectMethodDefault}
+		case Outbound_direct:
+			action.Action = C.RuleActionTypeRoute
+			action.RouteOptions = option.RouteActionOptions{Outbound: OutboundDirectTag}
+		case Outbound_direct_with_fragment:
+			action.Action = C.RuleActionTypeRoute
+			action.RouteOptions = option.RouteActionOptions{Outbound: OutboundDirectFragmentTag}
+		default: // Outbound_proxy
+			action.Action = C.RuleActionTypeRoute
+			action.RouteOptions = option.RouteActionOptions{Outbound: OutboundMainDetour}
+		}
 	}
 
 	return &option.Rule{

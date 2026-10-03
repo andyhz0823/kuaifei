@@ -74,6 +74,7 @@ class Rule extends $pb.GeneratedMessage {
     ..pPS(16, const $core.bool.fromEnvironment('protobuf.omit_field_names') ? '' : 'domain_suffix', protoName: 'domain_suffixes')
     ..pPS(17, const $core.bool.fromEnvironment('protobuf.omit_field_names') ? '' : 'domain_keyword', protoName: 'domain_keywords')
     ..pPS(18, const $core.bool.fromEnvironment('protobuf.omit_field_names') ? '' : 'domain_regex', protoName: 'domain_regexes')
+    ..aOS(19, const $core.bool.fromEnvironment('protobuf.omit_field_names') ? '' : 'outbound_tag')
     ..hasRequiredFields = false
   ;
 
@@ -97,6 +98,7 @@ class Rule extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? domainSuffixes,
     $core.Iterable<$core.String>? domainKeywords,
     $core.Iterable<$core.String>? domainRegexes,
+    $core.String? outboundTag,
   }) {
     final _result = create();
     if (listOrder != null) {
@@ -152,6 +154,9 @@ class Rule extends $pb.GeneratedMessage {
     }
     if (domainRegexes != null) {
       _result.domainRegexes.addAll(domainRegexes);
+    }
+    if (outboundTag != null) {
+      _result.outboundTag = outboundTag;
     }
     return _result;
   }
@@ -259,5 +264,14 @@ class Rule extends $pb.GeneratedMessage {
 
   @$pb.TagNumber(18)
   $core.List<$core.String> get domainRegexes => $_getList(17);
+
+  @$pb.TagNumber(19)
+  $core.String get outboundTag => $_getSZ(18);
+  @$pb.TagNumber(19)
+  set outboundTag($core.String v) { $_setString(18, v); }
+  @$pb.TagNumber(19)
+  $core.bool hasOutboundTag() => $_has(18);
+  @$pb.TagNumber(19)
+  void clearOutboundTag() => clearField(19);
 }
 

@@ -27,9 +27,13 @@ enum RuleEnum {
   domain,
   domainSuffix,
   domainKeyword,
-  domainRegex;
+  domainRegex,
+  outboundTag;
 
   int getIndex() => index + 1;
+
+  /// 是否为「自定义出站节点」（绑定具体节点/策略组的字段）。
+  bool get isCustomOutbound => this == outboundTag;
 
   String present(Translations t) => switch (this) {
     listOrder => this.name,
@@ -50,6 +54,8 @@ enum RuleEnum {
     domainSuffix => t.pages.settings.routing.routeRule.rule.tileTitle['domain_suffixe']!,
     domainKeyword => t.pages.settings.routing.routeRule.rule.tileTitle['domain_keyword']!,
     domainRegex => t.pages.settings.routing.routeRule.rule.tileTitle['domain_regex']!,
+    // 新增字段没有对应 i18n key（新增 key 需要重新生成 slang 产物），这里直接给内置文案。
+    outboundTag => '自定义出站节点',
   };
 }
 

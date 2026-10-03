@@ -25,6 +25,9 @@ message Rule {
   repeated string domain_suffixes = 16 [json_name = "domain_suffix"];
   repeated string domain_keywords = 17 [json_name = "domain_keyword"];
   repeated string domain_regexes = 18 [json_name = "domain_regex"];
+  // 自定义出站：非空时规则直指该 outbound tag（具体节点或 select/lowest/balance 策略组），
+  // 此时 outbound 枚举字段被忽略；为空时沿用 outbound 枚举（proxy/direct/...）。
+  string outbound_tag = 19 [json_name = "outbound_tag"];
 }
 
 enum Outbound {

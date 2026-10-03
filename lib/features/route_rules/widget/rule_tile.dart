@@ -19,7 +19,8 @@ class RuleTile extends HookConsumerWidget {
 
   Map detailChipsValue() {
     final map = rule.toProto3Json()! as Map<String, dynamic>;
-    map.removeWhere((key, value) => ['list_order', 'enabled', 'name', 'outbound'].contains(key));
+    // outbound 与 outbound_tag 已在标题处展示，不再重复进明细 chips。
+    map.removeWhere((key, value) => ['list_order', 'enabled', 'name', 'outbound', 'outbound_tag'].contains(key));
     map.updateAll(
       (key, value) => value is List
           ? value.length
@@ -80,8 +81,11 @@ class RuleTile extends HookConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ListTile(
+              // 绑定了具体节点时优先展示节点名 —— 这才是用户真正关心的分流去向。
               title: Text(
-                t.pages.settings.routing.routeRule.rule.outbound[rule.outbound.name] ?? rule.outbound.name,
+                rule.outboundTag.isNotEmpty
+                    ? rule.outboundTag
+                    : t.pages.settings.routing.routeRule.rule.outbound[rule.outbound.name] ?? rule.outbound.name,
                 style: Theme.of(context).textTheme.labelMedium,
               ),
               subtitle: Text(rule.name, style: Theme.of(context).textTheme.bodyLarge),

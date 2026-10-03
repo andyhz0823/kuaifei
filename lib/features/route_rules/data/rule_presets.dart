@@ -65,50 +65,12 @@ const kRouteRulePresets = <RulePreset>[
     ],
   ),
 
-  // ── 国内站点直连：`.cn` 全后缀 + 主要互联网厂商 ──
-  //    用 domainSuffix 匹配，避免逐个维护完整域名列表
-  RulePreset(
-    id: 'cnDirect',
-    name: '国内站点直连',
-    outbound: Outbound.direct,
-    domainSuffixes: [
-      'cn',
-      'baidu.com',
-      'qq.com',
-      'tencent.com',
-      'weixin.qq.com',
-      'taobao.com',
-      'tmall.com',
-      'alipay.com',
-      'alibaba.com',
-      'aliyun.com',
-      'alicdn.com',
-      'jd.com',
-      'jd.hk',
-      '163.com',
-      '126.com',
-      'bilibili.com',
-      'hdslb.com',
-      'zhihu.com',
-      'douyin.com',
-      'kuaishou.com',
-      'meituan.com',
-      'dianping.com',
-      'xiaomi.com',
-      'mi.com',
-      'huawei.com',
-      'oppo.com',
-      'vivo.com',
-      'sina.com.cn',
-      'weibo.com',
-      'sohu.com',
-      'iqiyi.com',
-      'youku.com',
-      'ctrip.com',
-      '12306.cn',
-      'amap.com',
-    ],
-  ),
+  // 注意：这里不再提供「国内站点直连」预设。
+  // 国内站点有数万个域名，手写域名后缀列表既不完整也不会更新。
+  // 正确做法由内核承担：设置 → 路由 → 区域 选择「中国」后，core 会自动加载
+  // geosite-cn（全量国内域名库）+ geoip-cn（国内 IP 段）两个远程规则集并直连，
+  // 规则集由 sing-box 按 update_interval 自动更新，无需手工维护。
+  // 见 rule_presets 面板里的「国内流量直连」引导项（rules_page.dart）。
 
   // ── 广告拦截：常见广告/追踪域名，指向 block ──
   RulePreset(

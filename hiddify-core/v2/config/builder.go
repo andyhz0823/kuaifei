@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	sync "sync"
 	"time"
@@ -874,6 +875,10 @@ func setRoutingOptions(options *option.Options, hopt *HiddifyOptions) error {
 			DNSRuleAction: rejectDnsAction,
 		})
 	}
+	// 用户自定义规则将插入到这里（regionRulesStart）：排在广告/安全等内置规则之后，
+	// 但在区域（Region）直连大盘规则之前 —— 区域规则覆盖的是「某个国家整体直连」，
+	// 用户显式配的「某 App / 某域名走某节点」应当优先于大盘，否则会被大盘抢先命中。
+	regionRulesStart := len(routeRules)
 	if hopt.Region != "other" {
 		dnsRules = append(dnsRules, option.DefaultDNSRule{
 			RawDefaultDNSRule: option.RawDefaultDNSRule{
@@ -978,9 +983,13 @@ func setRoutingOptions(options *option.Options, hopt *HiddifyOptions) error {
 		})
 	}
 	// 追加用户自定义分流规则（由客户端「路由规则」界面维护，见 user_route_rules.go）。
-	// 放在内置规则之后：内置的 DNS / 私有地址 / 广告拦截等安全规则仍优先匹配，
-	// 未命中任何规则时由下方 Final 兜底走主代理。
-	routeRules = append(routeRules, LoadUserRouteRules()...)
+	// 插入到 regionRulesStart（区域大盘规则之前），内置 DNS / 私有地址 / 广告拦截等
+	// 安全规则仍优先匹配；未命中任何规则时由下方 Final 兜底走主代理。
+	// outbound_tag 的存在性校验依赖完整的 outbound 列表，因此在这里（outbounds 已就绪）
+	// 才生成，再插回前面去。
+	if userRules := LoadUserRouteRules(collectOutboundTags(options)); len(userRules) > 0 {
+		routeRules = slices.Insert(routeRules, regionRulesStart, userRules...)
+	}
 
 	options.Route = &option.RouteOptions{
 		Rules:               routeRules,
@@ -1107,6 +1116,28 @@ func setRoutingOptions(options *option.Options, hopt *HiddifyOptions) error {
 	}
 	// }
 	return nil
+}
+
+// collectOutboundTags 收集当前配置里所有可用的 outbound tag，用于校验用户规则绑定的
+// 自定义出站（outbound_tag）。
+//
+// 预定义 tag（direct/bypass/select/lowest/balance/dns-out/...）也一并收录：UI 允许规则
+// 绑定到 select（手动选节点）、lowest（最低延迟）、balance（负载均衡）这类策略组，
+// 它们本身就是配置里的 outbound tag，收录进集合后无需特殊分支。
+func collectOutboundTags(options *option.Options) func(tag string) bool {
+	tags := make(map[string]struct{}, len(options.Outbounds)+len(PredefinedOutboundTags))
+	for _, out := range options.Outbounds {
+		if out.Tag != "" {
+			tags[out.Tag] = struct{}{}
+		}
+	}
+	for _, tag := range PredefinedOutboundTags {
+		tags[tag] = struct{}{}
+	}
+	return func(tag string) bool {
+		_, ok := tags[tag]
+		return ok
+	}
 }
 
 func patchHiddifyWarpFromConfig(out *option.Outbound, opt HiddifyOptions) *option.Outbound {

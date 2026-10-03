@@ -5,6 +5,7 @@ import 'package:hiddify/core/router/dialog/dialog_notifier.dart';
 import 'package:hiddify/features/route_rules/notifier/rule_notifier.dart';
 import 'package:hiddify/features/route_rules/overview/android_apps_page.dart';
 import 'package:hiddify/features/route_rules/overview/generic_list_page.dart';
+import 'package:hiddify/features/route_rules/overview/outbound_picker_page.dart';
 import 'package:hiddify/features/route_rules/widget/setting_checkbox.dart';
 import 'package:hiddify/features/route_rules/widget/setting_divider.dart';
 import 'package:hiddify/features/route_rules/widget/setting_generic_list.dart';
@@ -27,6 +28,7 @@ class RulePage extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = ref.watch(translationsProvider).requireValue;
     final isRuleEdited = ref.watch(IsRuleEditedProvider(ruleListOrder));
+    final customOutbound = ref.watch(ruleNotifierProvider(ruleListOrder).select((value) => value.outboundTag));
     // TODO(): PopScope logic must be transferred to onExit method of go_router
     return PopScope(
       canPop: !isRuleEdited,
@@ -74,13 +76,31 @@ class RulePage extends HookConsumerWidget {
                     ref.read(ruleNotifierProvider(ruleListOrder).notifier).update<String>(RuleEnum.name, value),
               ),
               SettingRadio<Outbound>(
-                title: RuleEnum.outbound.present(t),
+                title: '默认出站',
                 values: Outbound.values,
                 value: ref.watch(ruleNotifierProvider(ruleListOrder).select((value) => value.outbound)),
                 setValue: (value) =>
                     ref.read(ruleNotifierProvider(ruleListOrder).notifier).update<Outbound>(RuleEnum.outbound, value),
                 defaultValue: Outbound.direct,
                 t: t.pages.settings.routing.routeRule.rule.outbound,
+              ),
+              // 自定义出站：绑定具体节点/策略组，优先级高于上面的默认出站。
+              ListTile(
+                title: const Text('自定义出站节点'),
+                subtitle: Text(customOutbound.isEmpty ? '未指定（使用上面的默认出站）' : customOutbound),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  final selected = await Navigator.of(context).push<String>(
+                    MaterialPageRoute(
+                      builder: (context) => OutboundPickerPage(currentTag: customOutbound),
+                      fullscreenDialog: true,
+                    ),
+                  );
+                  if (selected == null) return;
+                  ref
+                      .read(ruleNotifierProvider(ruleListOrder).notifier)
+                      .update<String>(RuleEnum.outboundTag, selected);
+                },
               ),
               const SettingDivider(),
               SettingGenericList<String>(
