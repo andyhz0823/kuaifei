@@ -13,10 +13,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 class XboardApiClient with InfraLogger {
   static const subscriptionFlag = 'hiddify';
   static const defaultUserAgent = 'hiddify/4.1.0';
-  static const requestTimeout = Duration(seconds: 8);
-  static const mappedConnectTimeout = Duration(seconds: 3);
+  static const requestTimeout = Duration(seconds: 12);
+  // Per-address budget for one TCP connect plus one TLS handshake. A
+  // black-holed Cloudflare edge IP therefore costs ~2s, not the whole request.
+  static const addressConnectBudget = Duration(milliseconds: 2200);
+  // Total budget for the address rotation below. Must stay well under
+  // requestTimeout so a failed transport still reports a real error.
+  static const connectRoundBudget = Duration(milliseconds: 7000);
+  static const dohResolveBudget = Duration(milliseconds: 2500);
   static const prewarmTimeout = Duration(seconds: 2);
-  static const preferredEndpointTimeout = Duration(seconds: 3);
+  static const preferredEndpointTimeout = Duration(seconds: 4);
   static const _directTransportId = 'panel-direct';
   static const _fixedRelayTransportId = 'relay-xz';
 
@@ -179,53 +185,73 @@ class XboardApiClient with InfraLogger {
     );
   }
 
+  /// Connects to [uri] trying every known address until one completes TLS.
+  ///
+  /// A reachable address can still have its handshake terminated (SNI
+  /// filtering terminates the 172.67.x Cloudflare edges from mainland China
+  /// while 104.21.x keeps working). The previous implementation secured only
+  /// the first address that accepted a TCP connection, so one blocked edge IP
+  /// failed the entire transport even when a working address was already
+  /// known. TLS failures now advance to the next address.
   Future<Socket> _connectForUri(Uri uri) async {
-    final cached = TkyaOrigin.connectionAddressesForHost(uri.host).map(InternetAddress.new).toList(growable: false);
+    final stopwatch = Stopwatch()..start();
+    final attempted = <String>{};
     Object? lastError;
+
+    Future<Socket?> tryAddresses(Iterable<InternetAddress> addresses) async {
+      // IPv4 first: IPv6 to Cloudflare is frequently black-holed on mainland
+      // access networks and would otherwise burn the rotation budget.
+      final ordered = <InternetAddress>[
+        ...addresses.where((address) => address.type == InternetAddressType.IPv4),
+        ...addresses.where((address) => address.type != InternetAddressType.IPv4),
+      ];
+      for (final address in ordered) {
+        if (!attempted.add(address.address)) continue;
+        final remaining = connectRoundBudget - stopwatch.elapsed;
+        if (remaining <= Duration.zero) return null;
+        final budget = remaining < addressConnectBudget ? remaining : addressConnectBudget;
+        Socket? socket;
+        try {
+          socket = await Socket.connect(address, uri.port, timeout: budget);
+          return await _secureIfNeeded(uri, socket).timeout(budget);
+        } catch (error) {
+          socket?.destroy();
+          lastError = error;
+        }
+      }
+      return null;
+    }
+
+    final cached = TkyaOrigin.connectionAddressesForHost(uri.host);
     if (cached.isNotEmpty) {
+      final socket = await tryAddresses(cached.map(InternetAddress.new).toList(growable: false));
+      if (socket != null) return socket;
+    }
+
+    if (stopwatch.elapsed < connectRoundBudget) {
       try {
-        final socket = await _connectFirstAvailable(cached, uri.port, timeout: mappedConnectTimeout);
-        return _secureIfNeeded(uri, socket);
+        final resolution = await _resolver.resolve(uri.host).timeout(dohResolveBudget);
+        final socket = await tryAddresses(resolution.addresses);
+        if (socket != null) return socket;
       } catch (error) {
         lastError = error;
       }
-    }
-
-    try {
-      final resolution = await _resolver.resolve(uri.host).timeout(requestTimeout);
-      if (resolution.addresses.isNotEmpty) {
-        final socket = await _connectFirstAvailable(resolution.addresses, uri.port, timeout: mappedConnectTimeout);
-        return _secureIfNeeded(uri, socket);
-      }
-    } catch (error) {
-      lastError = error;
     }
 
     // Last local fallback: let the platform resolver try. If DNS is polluted,
-    // hostname verification should fail after TLS and the relay race can still win.
-    try {
-      final socket = await Socket.connect(uri.host, uri.port, timeout: mappedConnectTimeout);
-      return _secureIfNeeded(uri, socket);
-    } catch (error) {
-      throw SocketException('Cached, DoH and system endpoints failed for ${uri.host}: ${lastError ?? error}');
-    }
-  }
-
-  Future<Socket> _connectFirstAvailable(
-    List<InternetAddress> addresses,
-    int port, {
-    Duration timeout = requestTimeout,
-  }) async {
-    if (addresses.isEmpty) throw const SocketException('No resolved addresses available');
-    Object? lastError;
-    for (final address in addresses) {
+    // hostname verification should fail after TLS and the relay race can still
+    // win.
+    if (stopwatch.elapsed < connectRoundBudget) {
       try {
-        return await Socket.connect(address, port, timeout: timeout);
+        final resolved = await InternetAddress.lookup(uri.host).timeout(dohResolveBudget);
+        final socket = await tryAddresses(resolved);
+        if (socket != null) return socket;
       } catch (error) {
         lastError = error;
       }
     }
-    throw SocketException('Unable to connect to resolved address: $lastError');
+
+    throw SocketException('Cached, DoH and system endpoints failed for ${uri.host}: ${lastError ?? 'no usable address'}');
   }
 
   Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {

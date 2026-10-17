@@ -243,7 +243,17 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
     'raw.githubusercontent.com': ['185.199.108.133', '185.199.109.133', '185.199.110.133', '185.199.111.133'],
   };
 
-  static const List<String> cloudflareEdgeFallbackAddresses = ['172.67.163.238', '104.21.50.151'];
+  // Order is the retry order, so it encodes reachability from mainland
+  // China. Measured on 2026-10-17: the 104.21.0.0/16 pair completed TLS 3/3
+  // (~0.45s), 172.67.163.238 completed 1/3 (the other two were terminated
+  // during the handshake), and 172.67.163.144 was black-holed. The blocked
+  // addresses stay at the end so a future re-route can still reach them.
+  static const List<String> cloudflareEdgeFallbackAddresses = [
+    '104.21.50.151',
+    '104.21.34.178',
+    '172.67.163.238',
+    '172.67.163.144',
+  ];
 
   // These are Cloudflare edge addresses, not the origin server. The original URI
   // host remains in use for TLS SNI and the HTTP Host header.
@@ -311,11 +321,20 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   }
 
   static List<String> addressesForHost(String host) {
-    // The pinned primary-domain route intentionally wins over remotely supplied
-    // records, so a stale cache can never route panel hosts somewhere unreachable.
+    // The pinned primary-domain route still wins over remotely supplied
+    // records, so a stale cache can never route panel hosts somewhere
+    // unreachable. It is no longer the only candidate, though: a single
+    // blocked Cloudflare edge IP used to eliminate the whole host, so the
+    // configured records are appended and raced as well.
     final builtin = _match(builtinFallbackRecords, host);
-    if (builtin.isNotEmpty) return builtin;
-    return _match(_config.records, host);
+    if (builtin.isEmpty) return _match(_config.records, host);
+    final configured = _match(_config.records, host);
+    if (configured.isEmpty) return builtin;
+    final merged = <String>[...builtin];
+    for (final address in configured) {
+      if (!merged.contains(address)) merged.add(address);
+    }
+    return merged;
   }
 
   static bool isProtectedPanelHost(String host) {
