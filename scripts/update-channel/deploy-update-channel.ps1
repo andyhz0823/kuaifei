@@ -148,7 +148,14 @@ try {
 
   # ------------------------------------------------------------ 2. 上传远端脚本
   Info "上传远端投放脚本到 $remote"
-  & scp @scpOpts $mirrorScript "${remote}:/tmp/kuaifei-remote-mirror.sh"
+  # Windows 检出的 .sh 可能是 CRLF 行尾（仓库已用 .gitattributes 约束为 LF，
+  # 但本机 core.autocrlf 仍可能改写），bash 会把 `set -euo pipefail\r` 解析成
+  # 非法选项，报 "set: pipefail: invalid option name"，远端直接退出 2。
+  # 上传前统一转成 LF，且不带 BOM。
+  $normalizedScript = Join-Path $work 'remote_mirror_release.lf.sh'
+  $normalizedText = (Get-Content -LiteralPath $mirrorScript -Raw) -replace "`r`n", "`n"
+  [System.IO.File]::WriteAllText($normalizedScript, $normalizedText, (New-Object System.Text.UTF8Encoding($false)))
+  & scp @scpOpts $normalizedScript "${remote}:/tmp/kuaifei-remote-mirror.sh"
   if ($LASTEXITCODE -ne 0) { Die '远端脚本上传失败' }
 
   # ------------------------------------------------------------ 3. 远端拉取 + 镜像

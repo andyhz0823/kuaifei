@@ -1,0 +1,8 @@
+# 强制 shell 脚本以 LF 行尾检出。
+# 缺这一条时，Windows 上 core.autocrlf=true 会把仓库里的 LF 转成 CRLF，
+# scp 上传到 Linux 后 bash 会把 `set -euo pipefail\r` 解析成非法选项，
+# 报 "set: pipefail: invalid option name"，远端投放直接退出 2。
+*.sh text eol=lf
+
+# 批量脚本同理（deploy-update-channel.ps1 会在 Windows 上跑，不能用 LF）
+*.ps1 text eol=crlf
