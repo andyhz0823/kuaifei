@@ -231,7 +231,7 @@ jobs:
       - name: Generate verification metadata and SHA-256 checksums
         shell: bash
         env:
-          EXPECTED_CERTIFICATE_IDENTITY: ${{ github.workflow_ref }}
+          EXPECTED_CERTIFICATE_IDENTITY: https://github.com/${{ github.workflow_ref }}
           SIGSTORE_OIDC_ISSUER: https://token.actions.githubusercontent.com
         run: |
           set -euo pipefail
@@ -248,7 +248,7 @@ jobs:
       - name: Sign release artifacts with Sigstore keyless
         shell: bash
         env:
-          EXPECTED_CERTIFICATE_IDENTITY: ${{ github.workflow_ref }}
+          EXPECTED_CERTIFICATE_IDENTITY: https://github.com/${{ github.workflow_ref }}
           SIGSTORE_OIDC_ISSUER: https://token.actions.githubusercontent.com
         run: |
           set -euo pipefail
