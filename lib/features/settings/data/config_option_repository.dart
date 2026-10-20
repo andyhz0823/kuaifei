@@ -7,6 +7,8 @@ import 'package:hiddify/core/utils/json_converters.dart';
 import 'package:hiddify/core/utils/preferences_utils.dart';
 import 'package:hiddify/features/log/model/log_level.dart';
 import 'package:hiddify/features/profile/data/profile_parser.dart';
+import 'package:hiddify/features/route_rules/data/split_rule_encoder.dart';
+import 'package:hiddify/features/route_rules/notifier/rules_notifier.dart';
 import 'package:hiddify/features/settings/model/config_option_failure.dart';
 import 'package:hiddify/singbox/model/singbox_config_enum.dart';
 import 'package:hiddify/singbox/model/singbox_config_option.dart';
@@ -16,6 +18,56 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 abstract class ConfigOptions {
+  /// region 内置的分流规则：命中则直连。
+  ///
+  /// 这是原先被注释掉的写法，配合 core 侧恢复的规则引擎才会真正生效。
+  static List<SingboxRule> _regionSplitRules(Region region) {
+    switch (region) {
+      case Region.ir:
+        return const [
+          SingboxRule(
+            domains: 'domain:.ir,geosite:ir',
+            ip: 'geoip:ir',
+            outbound: RuleOutbound.bypass,
+          ),
+        ];
+      case Region.cn:
+        return const [
+          SingboxRule(
+            domains: 'domain:.cn,geosite:cn',
+            ip: 'geoip:cn',
+            outbound: RuleOutbound.bypass,
+          ),
+        ];
+      case Region.ru:
+        return const [
+          SingboxRule(
+            domains: 'domain:.ru',
+            ip: 'geoip:ru',
+            outbound: RuleOutbound.bypass,
+          ),
+        ];
+      case Region.af:
+        return const [
+          SingboxRule(
+            domains: 'domain:.af,geosite:af',
+            ip: 'geoip:af',
+            outbound: RuleOutbound.bypass,
+          ),
+        ];
+      case Region.id:
+        return const [
+          SingboxRule(
+            domains: 'domain:.id,geosite:id',
+            ip: 'geoip:id',
+            outbound: RuleOutbound.bypass,
+          ),
+        ];
+      default:
+        return const [];
+    }
+  }
+
   static final serviceMode = PreferencesNotifier.create<ServiceMode, String>(
     "service-mode",
     ServiceMode.defaultMode,
@@ -365,46 +417,15 @@ abstract class ConfigOptions {
   };
 
   static final singboxConfigOptions = Provider<SingboxConfigOption>((ref) {
-    // final region = ref.watch(Preferences.region);
-    final rules = <SingboxRule>[];
-    // final rules = switch (region) {
-    //   Region.ir => [
-    //       const SingboxRule(
-    //         domains: "domain:.ir,geosite:ir",
-    //         ip: "geoip:ir",
-    //         outbound: RuleOutbound.bypass,
-    //       ),
-    //     ],
-    //   Region.cn => [
-    //       const SingboxRule(
-    //         domains: "domain:.cn,geosite:cn",
-    //         ip: "geoip:cn",
-    //         outbound: RuleOutbound.bypass,
-    //       ),
-    //     ],
-    //   Region.ru => [
-    //       const SingboxRule(
-    //         domains: "domain:.ru",
-    //         ip: "geoip:ru",
-    //         outbound: RuleOutbound.bypass,
-    //       ),
-    //     ],
-    //   Region.af => [
-    //       const SingboxRule(
-    //         domains: "domain:.af,geosite:af",
-    //         ip: "geoip:af",
-    //         outbound: RuleOutbound.bypass,
-    //       ),
-    //     ],
-    //   Region.id => [
-    //       const SingboxRule(
-    //         domains: "domain:.id,geosite:id",
-    //         ip: "geoip:id",
-    //         outbound: RuleOutbound.bypass,
-    //       ),
-    //     ],
-    //   _ => <SingboxRule>[],
-    // };
+    final currentRegion = ref.watch(region);
+    // 分流规则：region 内置规则在前，用户在「路由规则」页配置的规则在后。
+    // 之前这里是写死的空数组，导致整套分流规则从来没被下发过（core 侧也是
+    // 整段注释状态），规则页形同虚设。
+    final rules = <SingboxRule>[
+      ..._regionSplitRules(currentRegion),
+      ...encodeSplitRules(ref.watch(rulesNotifierProvider)),
+    ];
+    // region 内置规则见 _regionSplitRules()。
 
     final mode = ref.watch(serviceMode);
     // final reg = ref.watch(Preferences.region.notifier).raw();

@@ -23,7 +23,7 @@ type HiddifyOptions struct {
 	BalancerStrategy        string `json:"balancer-strategy,omitempty" overridable:"true"`
 	// GeoIPPath        string      `json:"geoip-path"`
 	// GeoSitePath      string      `json:"geosite-path"`
-	Rules     []Rule              `json:"rules,omitempty" overridable:"true"`
+	Rules     []SplitRule         `json:"rules,omitempty" overridable:"true"`
 	Warp      WarpOptions         `json:"warp,omitempty"`
 	Warp2     WarpOptions         `json:"warp2,omitempty"`
 	Mux       MuxOptions          `json:"mux,omitempty" overridable:"true"`
@@ -151,7 +151,7 @@ func DefaultHiddifyOptions() *HiddifyOptions {
 		ClashApiSecret: "",
 		// GeoIPPath:      "geoip.db",
 		// GeoSitePath:    "geosite.db",
-		Rules: []Rule{},
+		Rules: []SplitRule{},
 		Mux: MuxOptions{
 			Enable:     false,
 			Padding:    true,

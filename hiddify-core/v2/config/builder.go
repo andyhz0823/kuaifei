@@ -685,45 +685,27 @@ func setRoutingOptions(options *option.Options, hopt *HiddifyOptions) error {
 		)
 	}
 
-	// for _, rule := range opt.Rules {
-	// 	routeRule := rule.MakeRule()
-	// 	switch rule.Outbound {
-	// 	case "bypass":
-	// 		routeRule.Outbound = OutboundBypassTag
-	// 	case "block":
-	// 		routeRule.Outbound = OutboundBlockTag
-	// 	case "proxy":
-	// 		routeRule.Outbound = OutboundMainProxyTag
-	// 	}
-
-	// 	if routeRule.IsValid() {
-	// 		routeRules = append(
-	// 			routeRules,
-	// 			option.Rule{
-	// 				Type:           C.RuleTypeDefault,
-	// 				DefaultOptions: routeRule,
-	// 			},
-	// 		)
-	// 	}
-
-	// 	dnsRule := rule.MakeDNSRule()
-	// 	switch rule.Outbound {
-	// 	case "bypass":
-	// 		dnsRule.Server = DNSDirectTag
-	// 	case "block":
-	// 		dnsRule.Server = DNSBlockTag
-	// 		dnsRule.DisableCache = true
-	// 	case "proxy":
-	// 		if opt.EnableFakeDNS {
-	// 			fakeDnsRule := dnsRule
-	// 			fakeDnsRule.Server = DNSFakeTag
-	// 			fakeDnsRule.Inbound = []string{InboundTUNTag, InboundMixedTag}
-	// 			dnsRules = append(dnsRules, fakeDnsRule)
-	// 		}
-	// 		dnsRule.Server = DNSRemoteTag
-	// 	}
-	// 	dnsRules = append(dnsRules, dnsRule)
-	// }
+	// ---- 用户自定义分流规则 ----
+	// 客户端自身豁免排在最前（Windows 下 find_process 能查到自身进程，
+	// 不豁免会导致客户端与面板通信被分流进代理形成死循环）。
+	if selfRule, ok := makeSelfBypassRule(); ok {
+		routeRules = append(routeRules, option.Rule{
+			Type:           C.RuleTypeDefault,
+			DefaultOptions: selfRule,
+		})
+	}
+	// 客户端侧已按 listOrder 排序并过滤掉未启用的规则，这里按序翻译。
+	for _, rule := range hopt.Rules {
+		if routeRule, ok := rule.MakeRouteRule(); ok {
+			routeRules = append(routeRules, option.Rule{
+				Type:           C.RuleTypeDefault,
+				DefaultOptions: routeRule,
+			})
+		}
+		if dnsRule, ok := rule.MakeDNSRule(); ok {
+			dnsRules = append(dnsRules, dnsRule)
+		}
+	}
 	forceDirectRoute := make([]string, 0)
 	if options.NTP != nil && options.NTP.Enabled {
 		forceDirectRoute = append(forceDirectRoute, options.NTP.Server)
@@ -987,7 +969,8 @@ func setRoutingOptions(options *option.Options, hopt *HiddifyOptions) error {
 		},
 		// OverrideAndroidVPN: hopt.EnableTun && C.IsAndroid,
 		RuleSet:     rulesets,
-		FindProcess: false,
+		// 打开后才能按进程名/路径分流（Windows 端「指定应用」依赖它）
+		FindProcess: true,
 		// GeoIP: &option.GeoIPOptions{
 		// 	Path: opt.GeoIPPath,
 		// },
