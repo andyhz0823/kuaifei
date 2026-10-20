@@ -10,6 +10,10 @@ import 'package:hiddify/singbox/model/singbox_rule.dart';
 ///   `pkg:`       Android 包名  `proc:`     进程名（Windows）
 ///   `procpath:`  进程全路径
 ///
+/// 指定节点 / 策略组：复用 ruleSets 字段承载，前缀 `node:`（单节点）或
+/// `group:`（策略组）。这些项不进入 domains，而是编码到 outboundTarget，
+/// core 侧把它作为 sing-box 的 outbound tag（节点名 = outbound tag）。
+///
 /// 之所以走字符串编码而不是直接下发结构化字段：core 侧的 HiddifyOptions 是手写
 /// struct，其 rules 字段用的就是这套字符串形态（与 Dart 侧 SingboxRule 对齐），
 /// 改 proto 需要 protoc 重新生成，成本高且容易与生成物脱节。
@@ -22,8 +26,19 @@ SingboxRule encodeSplitRule(Rule rule) {
     for (final item in rule.packageNames) 'pkg:$item',
     for (final item in rule.processNames) 'proc:$item',
     for (final item in rule.processPaths) 'procpath:$item',
-    for (final item in rule.ruleSets) 'ruleset:$item',
+    for (final item in rule.ruleSets)
+      if (!item.startsWith('node:') && !item.startsWith('group:')) 'ruleset:$item',
   ];
+
+  // 指定节点 / 策略组：从 ruleSets 里提取 node:/group: 前缀项。
+  final nodeTargets = rule.ruleSets.where((item) => item.startsWith('node:')).toList();
+  final groupTargets = rule.ruleSets.where((item) => item.startsWith('group:')).toList();
+  // 一个规则只能有一个出站目标，优先级：node > group（用户不应同时选两者）。
+  final target = nodeTargets.isNotEmpty
+      ? nodeTargets.first.substring('node:'.length)
+      : groupTargets.isNotEmpty
+      ? groupTargets.first.substring('group:'.length)
+      : null;
 
   return SingboxRule(
     domains: domains.isEmpty ? null : domains.join(','),
@@ -32,6 +47,7 @@ SingboxRule encodeSplitRule(Rule rule) {
     protocol: rule.protocols.isEmpty ? null : rule.protocols.map((e) => e.name).join(','),
     network: splitNetworkOf(rule.network),
     outbound: splitOutboundOf(rule.outbound),
+    outboundTarget: target,
   );
 }
 

@@ -253,9 +253,10 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
 
   // The primary panel domain must remain reachable even if DNS, Cloudflare,
   // or a cached origin-dns record is unavailable. Keep the original URI host for
-  // TLS SNI and HTTP Host while dialing this fixed production origin address.
+  // TLS SNI and HTTP Host while dialing these fixed Cloudflare edge addresses.
   static const Map<String, List<String>> builtinFallbackRecords = {
-    'kuaifei.top': ['34.92.219.162'],
+    'www.kuaify.cc.cd': ['104.21.84.66', '172.67.187.171'],
+    'kuaify.cc.cd': ['104.21.84.66', '172.67.187.171'],
   };
 
   static const List<String> protectedPanelBaseDomains = [];
@@ -307,7 +308,7 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
 
   static List<String> addressesForHost(String host) {
     // The fixed primary-origin route intentionally wins over remotely supplied
-    // records, preventing a stale cache from routing kuaifei.top back to an
+    // records, preventing a stale cache from routing the panel back to an
     // unreachable Cloudflare edge.
     final builtin = _match(builtinFallbackRecords, host);
     if (builtin.isNotEmpty) return builtin;

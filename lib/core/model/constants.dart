@@ -15,6 +15,11 @@ abstract class Constants {
   static const updateManifestUrl = "$distributionBaseUrl/Downloads/latest.json";
   static const windowsUpdateManifestUrl = "$distributionBaseUrl/Downloads/latest-windows.json";
   static const appCastUrl = "$distributionBaseUrl/Downloads/appcast.xml";
+
+  // 面板地址已对用户隐藏，登录/拉取订阅配置固定走 kuaify.cc.cd（107 面板）。
+  // 该域名由 Cloudflare 代理，客户端通过 KuaifeiOrigin 的边缘 IP 探测直连。
+  static const panelBaseUrl = "https://www.kuaify.cc.cd";
+  static const panelBaseDomain = "kuaify.cc.cd";
   static const telegramChannelUrl = "https://t.me/hiddify";
   static const privacyPolicyUrl = "https://hiddify.com/privacy-policy/";
   static const termsAndConditionsUrl = "https://hiddify.com/terms/";

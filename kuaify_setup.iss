@@ -1,6 +1,6 @@
 [Setup]
 AppId={{6L903538-42B1-4596-G479-BJ779F21A65D}}
-AppVersion=1.0.0
+AppVersion=5.0.0
 AppName=Kuaify
 AppPublisher=Kuaify
 AppPublisherURL=https://github.com/andyhz0823/Xboard
@@ -8,8 +8,8 @@ AppSupportURL=https://github.com/andyhz0823/Xboard
 AppUpdatesURL=https://xz.kuaity.top/Downloads/
 DefaultDirName={autopf64}\Kuaify
 DisableProgramGroupPage=yes
-OutputDir=dist\1.0.0+1
-OutputBaseFilename=kuaify-1.0.0
+OutputDir=dist\5.0.0+1
+OutputBaseFilename=kuaify-5.0.0
 Compression=lzma
 SolidCompression=yes
 SetupIconFile=windows\runner\resources\app_icon.ico
@@ -18,12 +18,12 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 CloseApplications=force
-VersionInfoVersion=1.0.0.0
-VersionInfoProductVersion=1.0.0.0
+VersionInfoVersion=5.0.0.0
+VersionInfoProductVersion=5.0.0.0
 VersionInfoDescription=Kuaify
 VersionInfoProductName=Kuaify
 VersionInfoCompany=Kuaify
-VersionInfoOriginalFileName=kuaify-1.0.0.exe
+VersionInfoOriginalFileName=kuaify-5.0.0.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

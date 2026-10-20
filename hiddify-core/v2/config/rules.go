@@ -33,13 +33,14 @@ import (
 // SplitRule 是客户端下发的分流规则。
 // 字段名与 Dart 侧 SingboxRule 的序列化结果保持一致（kebab-case）。
 type SplitRule struct {
-	RuleSetUrl string `json:"rule-set-url,omitempty"`
-	Domains    string `json:"domains,omitempty"`
-	Ip         string `json:"ip,omitempty"`
-	Port       string `json:"port,omitempty"`
-	Network    string `json:"network,omitempty"`
-	Protocol   string `json:"protocol,omitempty"`
-	Outbound   string `json:"outbound,omitempty"`
+	RuleSetUrl     string `json:"rule-set-url,omitempty"`
+	Domains        string `json:"domains,omitempty"`
+	Ip             string `json:"ip,omitempty"`
+	Port           string `json:"port,omitempty"`
+	Network        string `json:"network,omitempty"`
+	Protocol       string `json:"protocol,omitempty"`
+	Outbound       string `json:"outbound,omitempty"`
+	OutboundTarget string `json:"outbound-target,omitempty"`
 }
 
 // MakeRouteRule 把一条客户端规则翻译成 sing-box 的 route rule。
@@ -129,8 +130,13 @@ func (r *SplitRule) MakeDNSRule() (option.DefaultDNSRule, bool) {
 
 // outboundTarget 解析出站目标。
 // 返回 (outbound tag, action)；action 为空表示这条规则的 outbound 无法识别。
+// 优先级：outbound_target（具体节点/策略组名）> outbound 枚举。
 // 除了固定的 proxy/direct/block，也可直接写节点名（指向具体节点或策略组）。
 func (r *SplitRule) outboundTarget() (string, string) {
+	// 指定节点 / 策略组优先：直接作为 sing-box 的 outbound tag。
+	if target := strings.TrimSpace(r.OutboundTarget); target != "" {
+		return target, C.RuleActionTypeRoute
+	}
 	switch strings.ToLower(strings.TrimSpace(r.Outbound)) {
 	case "proxy":
 		return OutboundMainDetour, C.RuleActionTypeRoute

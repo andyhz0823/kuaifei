@@ -27,10 +27,10 @@ final authNotifierProvider = AsyncNotifierProvider<AuthNotifier, AuthStatus>(() 
 
 class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   static const _loginTimeout = Duration(seconds: 25);
-  static const _loginTimeoutMessage = '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top';
+  static const _loginTimeoutMessage = '登录失败，请检查网络后重试';
   // ignore: unused_field
   static const _defaultPurchaseUrl = Constants.purchaseUrl;
-  static const _legacyPurchaseUrl = 'https://kuaifei.top';
+  static const _legacyPurchaseUrl = 'https://www.kuaify.cc.cd';
   static const _defaultContactEmail = 'wahiya562@gmail.com';
   static const _legacyContactEmail = 'mahiya562@gmail.com';
   static const _profileRefreshInterval = Duration(minutes: 30);
