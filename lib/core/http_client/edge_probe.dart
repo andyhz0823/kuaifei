@@ -65,7 +65,8 @@ class EdgeProbe {
     try {
       final stopwatch = Stopwatch()..start();
       raw = await Socket.connect(address, 443, timeout: _timeout);
-      secure = await SecureSocket.secure(raw, host: sniHost, onBadCertificate: (_) => true, timeout: _timeout);
+      // 注意：SecureSocket.secure 没有 timeout 具名参数（SDK 差异），用 Future.timeout 兜住。
+      secure = await SecureSocket.secure(raw, host: sniHost, onBadCertificate: (_) => true).timeout(_timeout);
       stopwatch.stop();
       return stopwatch.elapsedMilliseconds;
     } catch (_) {
