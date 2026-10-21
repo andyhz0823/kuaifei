@@ -16,7 +16,7 @@ class RulePresets {
           name: '国内域名直连',
           outbound: Outbound.direct,
           domainSuffixes: ['cn', 'com.cn', 'org.cn', 'gov.cn', 'edu.cn', 'net.cn'],
-          ipCidrs: ['geoip:cn'],
+          // 不要用 geoip:cn —— sing-box 1.12 已移除 geoip 数据库，会让 core 启动失败。
           network: Network.all,
         ),
       ],
@@ -40,14 +40,7 @@ class RulePresets {
         Rule(
           name: 'AI 服务代理',
           outbound: Outbound.proxy,
-          domainSuffixes: [
-            'openai.com',
-            'anthropic.com',
-            'claude.ai',
-            'google.com',
-            'github.com',
-            'gemini.google.com',
-          ],
+          domainSuffixes: ['openai.com', 'anthropic.com', 'claude.ai', 'google.com', 'github.com', 'gemini.google.com'],
           network: Network.all,
         ),
       ],
