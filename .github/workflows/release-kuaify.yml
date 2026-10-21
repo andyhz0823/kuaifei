@@ -112,6 +112,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      # Gradle + 自编译 AAR（含 4 个 ABI 的 native 库）+ Flutter 产物会撑爆
+      # ubuntu-latest 的剩余空间，实测在 flutter build apk 阶段
+      # "No space left on device" 直接中断。先清掉与本构建无关的大件。
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "--- before ---"; df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/az /usr/local/share/boost \
+                      /opt/hostedtoolcache/CodeQL \
+                      /usr/local/lib/android/sdk/system-images \
+                      /usr/local/lib/android/sdk/emulator || true
+          sudo apt-get clean || true
+          echo "--- after ---"; df -h /
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.44.4'
@@ -253,9 +267,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path $out, $portable | Out-Null
           Copy-Item 'build\windows\x64\runner\Release\*' $portable -Recurse -Force
           Compress-Archive -Path "$portable\*" -DestinationPath "$out\kuaify-$env:VERSION.zip" -Force
-          & iscc /Qp kuaify_setup.iss
+          & iscc /Qp /DMyAppVersion=$env:VERSION /DMyAppBuild=$env:BUILD_NUMBER kuaify_setup.iss
           $installer = Get-ChildItem -Path (Join-Path $PWD 'dist') -Filter "kuaify-$env:VERSION.exe" -Recurse -File | Select-Object -First 1
           if ($null -eq $installer) {
+            Get-ChildItem -Path (Join-Path $PWD 'dist') -Recurse -File | Select-Object -ExpandProperty FullName
             throw "Inno Setup did not produce kuaify-$env:VERSION.exe under dist"
           }
           Copy-Item $installer.FullName "$out\kuaify-$env:VERSION.exe" -Force
