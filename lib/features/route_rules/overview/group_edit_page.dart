@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:hiddify/features/proxy/data/proxy_data_providers.dart';
+import 'package:hiddify/features/route_rules/data/available_outbounds_provider.dart';
 import 'package:hiddify/features/route_rules/notifier/groups_notifier.dart';
-import 'package:hiddify/hiddifycore/generated/v2/hcore/hcore.pb.dart';
 import 'package:hiddify/singbox/model/singbox_group.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
@@ -53,14 +52,13 @@ class _GroupEditPageState extends ConsumerState<GroupEditPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final proxies = ref.watch(proxyRepositoryProvider).watchActiveProxies();
+    // 不依赖 core 已连接：从激活订阅的生成配置里取节点，断开状态也能选。
+    final asyncOptions = ref.watch(availableOutboundsProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.initial == null ? '新建策略组' : '编辑策略组'),
-        actions: [
-          IconButton(onPressed: _save, icon: const Icon(Icons.check)),
-        ],
+        actions: [IconButton(onPressed: _save, icon: const Icon(Icons.check))],
       ),
       body: Column(
         children: [
@@ -71,11 +69,7 @@ class _GroupEditPageState extends ConsumerState<GroupEditPage> {
               children: [
                 TextField(
                   controller: _nameController,
-                  decoration: const InputDecoration(
-                    labelText: '组名',
-                    hintText: '例如：香港节点',
-                    border: OutlineInputBorder(),
-                  ),
+                  decoration: const InputDecoration(labelText: '组名', hintText: '例如：香港节点', border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 16),
                 Row(
@@ -100,18 +94,10 @@ class _GroupEditPageState extends ConsumerState<GroupEditPage> {
           ),
           const Divider(height: 1),
           Expanded(
-            child: StreamBuilder(
-              stream: proxies,
-              builder: (context, snapshot) {
-                final data = snapshot.data;
-                if (data == null) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                return data.fold(
-                  (failure) => Center(child: Text('加载节点失败：$failure')),
-                  (groups) => _buildNodes(context, groups),
-                );
-              },
+            child: asyncOptions.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (error, _) => Center(child: Text('加载节点失败：$error')),
+              data: (options) => _buildNodes(context, options),
             ),
           ),
         ],
@@ -119,28 +105,22 @@ class _GroupEditPageState extends ConsumerState<GroupEditPage> {
     );
   }
 
-  Widget _buildNodes(BuildContext context, List<OutboundGroup> groups) {
-    final nodes = <OutboundInfo>[];
-    final seen = <String>{};
-    for (final group in groups) {
-      for (final item in group.items) {
-        if (!item.isVisible || item.isGroup) continue;
-        if (item.tag.isEmpty || !seen.add(item.tag)) continue;
-        nodes.add(item);
-      }
-    }
+  Widget _buildNodes(BuildContext context, List<OutboundOption> options) {
+    // 策略组只能由真实节点组成，不能再嵌套策略组。
+    final nodes = options.where((option) => !option.isGroup).toList(growable: false);
 
     if (nodes.isEmpty) {
-      return const Center(child: Text('暂无可用节点，请先连接订阅'));
+      return const Center(
+        child: Padding(padding: EdgeInsets.all(24), child: Text('暂无可用节点。请先在「订阅」页添加并激活一个配置，然后回到这里。')),
+      );
     }
 
     return ListView.builder(
       itemCount: nodes.length,
       itemBuilder: (context, index) {
         final node = nodes[index];
-        final displayName = node.tagDisplay.isNotEmpty ? node.tagDisplay : node.tag;
         return CheckboxListTile(
-          title: Text(displayName),
+          title: Text(node.tag),
           subtitle: node.host.isNotEmpty ? Text(node.host, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
           value: _selectedNodes.contains(node.tag),
           onChanged: (checked) {
