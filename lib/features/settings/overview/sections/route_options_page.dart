@@ -41,6 +41,12 @@ class RouteOptionsPage extends HookConsumerWidget {
                 if (context.mounted) context.goNamed('perAppProxy');
               },
             ),
+          ListTile(
+            title: Text(t.pages.settings.routing.routeRule.title),
+            leading: const Icon(Icons.rule_rounded),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => context.goNamed('routeRules'),
+          ),
           ChoicePreferenceWidget(
             selected: ref.watch(ConfigOptions.region),
             preferences: ref.watch(ConfigOptions.region.notifier),
