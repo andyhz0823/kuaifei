@@ -129,7 +129,10 @@ class OriginDnsConfig {
       for (final entry in rawRecords.entries) {
         final host = KuaifeiOrigin.normalizePattern(entry.key.toString());
         final addresses = KuaifeiOrigin.normalizeAddresses(entry.value);
-        if (host != null && addresses.isNotEmpty) records[host] = addresses;
+        // 别的品牌的 origin 记录（kuaifei.top / kuaity.top / kuaifei.cc.cd …）一律不收，
+        // 否则客户端可能拿它去拨号，把请求送到 216 / 192。
+        if (host == null || addresses.isEmpty || KuaifeiOrigin.isForeignBrandHost(host)) continue;
+        records[host] = addresses;
       }
     }
 
@@ -156,7 +159,12 @@ class OriginDnsConfig {
     if (rawAuthEndpoints is Iterable) {
       for (final endpoint in rawAuthEndpoints) {
         final parsed = ClientAuthEndpoint.fromJson(endpoint);
-        if (parsed.isUsable) authEndpoints.add(parsed);
+        if (!parsed.isUsable) continue;
+        // 只接受本品牌域名的端点。跨品牌端点（216 下发的 kuaify.top / kuaifj.top /
+        // kuaifei.cc.cd / xz.kuaity.top）会把登录和订阅带到错误的面板。
+        final host = Uri.tryParse(parsed.url)?.host ?? '';
+        if (!KuaifeiOrigin.isBrandHost(host)) continue;
+        authEndpoints.add(parsed);
       }
     }
     authEndpoints.sort((left, right) => left.priority.compareTo(right.priority));
@@ -232,10 +240,45 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
     return context;
   }
 
-  static const preferenceKey = 'origin_dns_last_known_good_v1';
-  static const endpointPoolPreferenceKey = 'auth_endpoint_pool_v1';
-  static const lastKnownGoodEndpointPreferenceKey = 'auth_last_known_good_endpoint_v1';
+  static const preferenceKey = 'origin_dns_last_known_good_v2';
+  static const endpointPoolPreferenceKey = 'auth_endpoint_pool_v2';
+  static const lastKnownGoodEndpointPreferenceKey = 'auth_last_known_good_endpoint_v2';
   static OriginDnsConfig _config = const OriginDnsConfig.empty();
+
+  /// 属于本品牌的域名后缀。服务端下发的端点只要不在此列一律丢弃。
+  ///
+  /// 这条白名单是「登录被带到别的品牌面板」的最终兜底：216（kuaifei 线）会把
+  /// kuaify.top / kuaifj.top / kuaifei.cc.cd / xz.kuaity.top 当成自己的端点下发，
+  /// 只按优先级排序的话客户端就会挑到 216。
+  static const List<String> brandDomainSuffixes = ['kuaify.cc.cd', 'tkyayun.cc.cd'];
+
+  /// 其它品牌的域名（216 / 192 的站点与分发域），出现在 origin 记录里直接丢弃。
+  static const List<String> foreignBrandDomainSuffixes = [
+    'kuaifei.top',
+    'kuaity.top',
+    'kuaifei.cc.cd',
+    'tkya.cc.cd',
+    'kuaify.top',
+    'kuaifj.top',
+  ];
+
+  static bool isBrandHost(String host) {
+    final value = host.trim().toLowerCase();
+    if (value.isEmpty) return false;
+    for (final suffix in brandDomainSuffixes) {
+      if (value == suffix || value.endsWith('.$suffix')) return true;
+    }
+    return false;
+  }
+
+  static bool isForeignBrandHost(String host) {
+    final value = host.trim().toLowerCase();
+    if (value.isEmpty) return false;
+    for (final suffix in foreignBrandDomainSuffixes) {
+      if (value == suffix || value.endsWith('.$suffix')) return true;
+    }
+    return false;
+  }
 
   static const Map<String, List<String>> githubBootstrapRecords = {
     'github.com': ['20.29.134.23'],
@@ -285,9 +328,13 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
 
     final encoded = jsonEncode(next.toJson());
     if (!await preferences.setString(preferenceKey, encoded)) return false;
+    // 落盘前再过滤一次：只保留本品牌域名的端点，杜绝跨品牌端点被缓存复用。
+    final brandEndpoints = next.authEndpoints
+        .where((endpoint) => isBrandHost(Uri.tryParse(endpoint.url)?.host ?? ''))
+        .toList(growable: false);
     await preferences.setString(
       endpointPoolPreferenceKey,
-      jsonEncode(next.authEndpoints.map((endpoint) => endpoint.toJson()).toList(growable: false)),
+      jsonEncode(brandEndpoints.map((endpoint) => endpoint.toJson()).toList(growable: false)),
     );
     _config = next;
     return true;

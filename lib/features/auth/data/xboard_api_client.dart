@@ -49,7 +49,9 @@ class XboardApiClient with InfraLogger {
       ),
       _relayDio = Dio(
         BaseOptions(
-          baseUrl: Constants.distributionBaseUrl,
+          // 固定中继必须落在本品牌面板域上。历史上这里是 xz.kuaity.top（216），
+          // 登录竞速时会直接把请求送到 kuaifei 面板。
+          baseUrl: Constants.panelBaseUrl,
           connectTimeout: requestTimeout,
           sendTimeout: requestTimeout,
           receiveTimeout: requestTimeout,
@@ -66,7 +68,7 @@ class XboardApiClient with InfraLogger {
     _transportDios[_directTransportId] = _dio;
     _transportUrls[_directTransportId] = _baseUri.toString();
     _transportDios[_fixedRelayTransportId] = _relayDio;
-    _transportUrls[_fixedRelayTransportId] = Constants.distributionBaseUrl;
+    _transportUrls[_fixedRelayTransportId] = Constants.panelBaseUrl;
     _configureDynamicEndpoints(userAgent);
     _restorePreferredEndpoint();
   }

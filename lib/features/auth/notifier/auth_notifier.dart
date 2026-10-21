@@ -78,6 +78,10 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     if (normalized == null || normalized.isEmpty || normalized == _legacyPurchaseUrl) {
       return Constants.purchaseUrl;
     }
+    // 服务端可能下发别的品牌的续费页（历史上是 216 的 xz.kuaity.top），
+    // 非本品牌域名一律丢弃，回落到 kuaify 自己的面板。
+    final host = Uri.tryParse(normalized)?.host ?? '';
+    if (!KuaifeiOrigin.isBrandHost(host)) return Constants.purchaseUrl;
     return normalized;
   }
 
@@ -370,9 +374,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     // has its own URL/name and ProfileRepository serializes database writes, so
     // concurrent downloads allow available packages to appear immediately.
     final outcomes = await Future.wait(
-      profiles.where((profile) => profile.subscribeUrl.isNotEmpty).map(
-        (profile) => _syncSubscriptionProfile(repo, profile),
-      ),
+      profiles
+          .where((profile) => profile.subscribeUrl.isNotEmpty)
+          .map((profile) => _syncSubscriptionProfile(repo, profile)),
     );
 
     var successCount = 0;
@@ -433,6 +437,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       return (profile: profile, success: false, failure: error);
     }
   }
+
   Future<void> _normalizeSyncedProfileNames(
     Db db,
     List<XboardSubscriptionProfile> profiles,
