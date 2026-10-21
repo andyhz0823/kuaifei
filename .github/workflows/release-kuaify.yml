@@ -333,6 +333,11 @@ jobs:
               "$file"
           done
       - name: Attest release build provenance
+        # 🔴 本仓库是 private（user-owned），GitHub 的 artifact attestation 只对
+        # public 仓库开放：Failed to persist attestation: Feature not available
+        # for user-owned private repositories。这里降级为非致命，仓库转 public 后
+        # 会自动恢复产出；Sigstore 的 cosign 签名不受影响，仍然照常生成与校验。
+        continue-on-error: true
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
