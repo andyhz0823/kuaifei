@@ -43,6 +43,8 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   @override
   Future<AuthStatus> build() async {
     KuaifeiOrigin.restore(_prefs);
+    // 后台探测 CF 边缘 IP（缓存 6 小时有效），不阻塞启动。
+    _warmEdgeCacheIfNeeded();
     ref.onDispose(() {
       _originRefreshTimer?.cancel();
       _profileRefreshTimer?.cancel();
@@ -52,6 +54,14 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   }
 
   SharedPreferences get _prefs => ref.read(sharedPreferencesProvider).requireValue;
+
+  /// CF 边缘 IP 自动优选：只在缓存缺失/过期时探测一次（结果 6 小时有效）。
+  void _warmEdgeCacheIfNeeded() {
+    if (KuaifeiOrigin.hasProbedEdgeAddresses) return;
+    final host = Uri.tryParse(Constants.panelBaseUrl)?.host;
+    if (host == null || host.isEmpty) return;
+    unawaited(KuaifeiOrigin.refreshEdgeCache(_prefs, sniHost: host));
+  }
 
   String? _readPanelUrl() => _prefs.getString('auth_panel_url');
   String? _readSanctumToken() => _prefs.getString('auth_sanctum_token');
@@ -136,6 +146,8 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       // Authentication is complete once credentials and subscription metadata
       // are durable. Profile downloads can be slow and must run in background.
       loggy.debug('Auth: login successful for $email');
+      // 登录成功说明网络可用，顺手刷新一次边缘 IP 优选结果。
+      _warmEdgeCacheIfNeeded();
       _scheduleRefreshes();
       unawaited(_syncProfilesAfterLogin());
       return AuthStatus.authenticated;

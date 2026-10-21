@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:hiddify/core/http_client/edge_probe.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ClientAuthEndpoint {
@@ -245,6 +246,10 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   static const lastKnownGoodEndpointPreferenceKey = 'auth_last_known_good_endpoint_v2';
   static OriginDnsConfig _config = const OriginDnsConfig.empty();
 
+  /// 自动优选出来的 CF 边缘 IP（按当前网络握手延迟排序）。
+  /// 非空时优先于写死的 [builtinFallbackRecords]。
+  static List<String> _probedEdgeAddresses = const [];
+
   /// 属于本品牌的域名后缀。服务端下发的端点只要不在此列一律丢弃。
   ///
   /// 这条白名单是「登录被带到别的品牌面板」的最终兜底：216（kuaifei 线）会把
@@ -316,6 +321,8 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   static OriginDnsConfig get config => _config;
 
   static void restore(SharedPreferences preferences) {
+    // 先恢复自动优选的边缘 IP：它比写死的两个更贴合当前网络。
+    _probedEdgeAddresses = EdgeProbe.readCache(preferences);
     final raw = preferences.getString(preferenceKey);
     if (raw == null || raw.isEmpty) return;
     try {
@@ -325,6 +332,23 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
       // A malformed cache is ignored and replaced after the next successful sync.
     }
   }
+
+  /// 探测一批 CF 边缘 IP，挑当前网络最快的几个缓存起来（6 小时有效）。
+  ///
+  /// [sniHost] 用面板域名即可：CF 是 anycast + 按 SNI 路由，任意边缘 IP 都能
+  /// 服务我们的 zone，所以同一组结果对订阅域名同样适用。
+  static Future<void> refreshEdgeCache(SharedPreferences preferences, {required String sniHost}) async {
+    try {
+      final best = await EdgeProbe.probe(sniHost);
+      if (best.isEmpty) return;
+      _probedEdgeAddresses = best;
+      await EdgeProbe.writeCache(preferences, best);
+    } catch (_) {
+      // 探测失败就继续用写死的兜底地址。
+    }
+  }
+
+  static bool get hasProbedEdgeAddresses => _probedEdgeAddresses.isNotEmpty;
 
   static Future<bool> replace(SharedPreferences preferences, OriginDnsConfig next, {bool onlyIfNewer = false}) async {
     if (!next.isUsable) return false;
@@ -366,7 +390,12 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
     // records, preventing a stale cache from routing the panel back to an
     // unreachable Cloudflare edge.
     final builtin = _match(builtinFallbackRecords, host);
-    if (builtin.isNotEmpty) return builtin;
+    if (builtin.isNotEmpty) {
+      // 自动优选结果优先：写死的两个边缘 IP 在某些网络下会被墙/绕路，
+      // 探测出来的这组是当前网络握手最快的。
+      if (_probedEdgeAddresses.isNotEmpty) return _probedEdgeAddresses;
+      return builtin;
+    }
     return _match(_config.records, host);
   }
 
