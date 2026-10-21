@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hiddify/features/route_rules/data/available_outbounds_provider.dart';
+import 'package:hiddify/features/route_rules/data/node_latency_provider.dart';
+import 'package:hiddify/features/route_rules/widget/latency_badge.dart';
 import 'package:hiddify/features/route_rules/notifier/groups_notifier.dart';
 import 'package:hiddify/singbox/model/singbox_group.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -58,7 +60,19 @@ class _GroupEditPageState extends ConsumerState<GroupEditPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.initial == null ? '新建策略组' : '编辑策略组'),
-        actions: [IconButton(onPressed: _save, icon: const Icon(Icons.check))],
+        actions: [
+          IconButton(
+            tooltip: '重新测速',
+            icon: const Icon(Icons.speed),
+            onPressed: () {
+              final options = asyncOptions.asData?.value;
+              if (options != null) {
+                ref.read(nodeLatencyProvider.notifier).measure(options, force: true);
+              }
+            },
+          ),
+          IconButton(onPressed: _save, icon: const Icon(Icons.check)),
+        ],
       ),
       body: Column(
         children: [
@@ -97,7 +111,12 @@ class _GroupEditPageState extends ConsumerState<GroupEditPage> {
             child: asyncOptions.when(
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (error, _) => Center(child: Text('加载节点失败：$error')),
-              data: (options) => _buildNodes(context, options),
+              data: (options) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) ref.read(nodeLatencyProvider.notifier).measure(options);
+                });
+                return _buildNodes(context, options);
+              },
             ),
           ),
         ],
@@ -119,9 +138,11 @@ class _GroupEditPageState extends ConsumerState<GroupEditPage> {
       itemCount: nodes.length,
       itemBuilder: (context, index) {
         final node = nodes[index];
+        final latency = ref.watch(nodeLatencyProvider.select((state) => state.results[node.tag]));
         return CheckboxListTile(
           title: Text(node.tag),
           subtitle: node.host.isNotEmpty ? Text(node.host, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
+          secondary: LatencyBadge(option: node, latency: latency),
           value: _selectedNodes.contains(node.tag),
           onChanged: (checked) {
             setState(() {

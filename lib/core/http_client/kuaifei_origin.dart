@@ -300,6 +300,14 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   static const Map<String, List<String>> builtinFallbackRecords = {
     'www.kuaify.cc.cd': ['104.21.84.66', '172.67.187.171'],
     'kuaify.cc.cd': ['104.21.84.66', '172.67.187.171'],
+    // 订阅链接走服务端随机子域 `https://[rand9].tkyayun.cc.cd/vip/<token>`，
+    // 这一条之前没有任何托底记录：DNS 被污染时整条订阅链路直接失败
+    // （表现为「订阅下载失败」，只能等系统 DNS 恢复）。
+    // 下面是 tkyayun.cc.cd 这个 zone 的 Cloudflare 边缘 IP（2026-10-22 DoH 实测：
+    // `dig +short tkyayun.cc.cd @1.1.1.1` → 172.67.179.226 / 104.21.35.212）。
+    // 通配符条目由 _match() 匹配任意 `<label>.tkyayun.cc.cd`。
+    'tkyayun.cc.cd': ['172.67.179.226', '104.21.35.212'],
+    '*.tkyayun.cc.cd': ['172.67.179.226', '104.21.35.212'],
   };
 
   static const List<String> protectedPanelBaseDomains = [];

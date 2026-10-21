@@ -16,17 +16,27 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 /// 现在改为让 core 解析**激活订阅的配置文件**（generateConfig，不需要启动
 /// 路由/连接），直接从 outbounds 里取 tag；再叠加用户自建策略组。
 class OutboundOption {
-  const OutboundOption({required this.tag, required this.type, this.host = '', required this.isGroup});
+  const OutboundOption({required this.tag, required this.type, this.host = '', this.port = 0, required this.isGroup});
 
   final String tag;
   final String type;
+
+  /// 节点服务器地址（域名或 IP）。策略组没有该字段。
   final String host;
+
+  /// 节点端口。策略组为 0。
+  final int port;
+
   final bool isGroup;
+
+  /// 只有真实节点（有 server + port）才做延迟探测。
+  bool get canMeasure => !isGroup && host.isNotEmpty && port > 0;
 }
 
 /// core 内部出站与协议类型，不作为「可指定节点」展示。
 const _systemTags = {'direct', 'block', 'dns-out', 'dns', 'bypass', 'block-out'};
 const _systemTypes = {'direct', 'block', 'dns'};
+const _groupTypes = {'selector', 'urltest', 'balancer'};
 
 final availableOutboundsProvider = FutureProvider.autoDispose<List<OutboundOption>>((ref) async {
   final options = <OutboundOption>[];
@@ -52,12 +62,15 @@ final availableOutboundsProvider = FutureProvider.autoDispose<List<OutboundOptio
           final type = item['type']?.toString().toLowerCase() ?? '';
           if (tag.isEmpty || _systemTypes.contains(type)) continue;
           if (_systemTags.contains(tag.toLowerCase())) continue;
+          final rawPort = item['server_port'];
+          final port = rawPort is num ? rawPort.toInt() : int.tryParse(rawPort?.toString() ?? '') ?? 0;
           add(
             OutboundOption(
               tag: tag,
               type: type,
               host: item['server']?.toString() ?? '',
-              isGroup: type == 'selector' || type == 'urltest',
+              port: port,
+              isGroup: _groupTypes.contains(type),
             ),
           );
         }
