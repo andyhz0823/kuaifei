@@ -16,3 +16,9 @@ data
 node_modules
 *.db
 *.json
+# --- 反向放行（自定义分流规则 core 从源码编译必需）---
+# dnstt 的 //go:embed resolvers_by_country.json 需要该文件参与编译，
+# 上面 *.json 会把它排除，导致 go build 报 "no matching files found"。
+!hiddify-sing-box/protocol/hiddify/dnstt/resolvers_by_country.json
+# lib_install 的 npm install 需要一个 package.json 占位文件。
+!package.json
