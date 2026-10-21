@@ -24,6 +24,7 @@ type HiddifyOptions struct {
 	// GeoIPPath        string      `json:"geoip-path"`
 	// GeoSitePath      string      `json:"geosite-path"`
 	Rules     []SplitRule         `json:"rules,omitempty" overridable:"true"`
+	Groups    []SplitGroup        `json:"groups,omitempty" overridable:"true"`
 	Warp      WarpOptions         `json:"warp,omitempty"`
 	Warp2     WarpOptions         `json:"warp2,omitempty"`
 	Mux       MuxOptions          `json:"mux,omitempty" overridable:"true"`
@@ -151,7 +152,8 @@ func DefaultHiddifyOptions() *HiddifyOptions {
 		ClashApiSecret: "",
 		// GeoIPPath:      "geoip.db",
 		// GeoSitePath:    "geosite.db",
-		Rules: []SplitRule{},
+		Rules:  []SplitRule{},
+		Groups: []SplitGroup{},
 		Mux: MuxOptions{
 			Enable:     false,
 			Padding:    true,

@@ -11,8 +11,13 @@ import 'package:hiddify/utils/custom_loggers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class XboardApiClient with InfraLogger {
-  static const subscriptionFlag = 'hiddify';
-  static const defaultUserAgent = 'hiddify/4.1.0';
+  // 订阅拉取用的协议 flag。Xboard 的「外部订阅节点」只在 General 协议（base64
+  // URI 列表）下合并进订阅内容（ClientController::appendExternalSubscriptions-
+  // ToGeneralSubscription 对非 General 协议直接 return）。若用 hiddify/sing-box
+  // 会走 SingBox 协议返回 JSON，只含本地自有节点、丢失全部外部订阅节点。
+  // 故这里用 v2rayn（General 协议），拿到完整节点列表。
+  static const subscriptionFlag = 'v2rayn';
+  static const defaultUserAgent = 'v2rayn/4.1.0';
   static const requestTimeout = Duration(seconds: 8);
   static const mappedConnectTimeout = Duration(seconds: 3);
   static const prewarmTimeout = Duration(seconds: 2);

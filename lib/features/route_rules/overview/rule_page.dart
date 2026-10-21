@@ -5,6 +5,7 @@ import 'package:hiddify/core/router/dialog/dialog_notifier.dart';
 import 'package:hiddify/features/route_rules/notifier/rule_notifier.dart';
 import 'package:hiddify/features/route_rules/overview/android_apps_page.dart';
 import 'package:hiddify/features/route_rules/overview/generic_list_page.dart';
+import 'package:hiddify/features/route_rules/overview/node_selection_page.dart';
 import 'package:hiddify/features/route_rules/widget/setting_checkbox.dart';
 import 'package:hiddify/features/route_rules/widget/setting_divider.dart';
 import 'package:hiddify/features/route_rules/widget/setting_generic_list.dart';
@@ -22,6 +23,51 @@ class RulePage extends HookConsumerWidget {
   final int? ruleListOrder;
 
   String getTitle(Map<String, String> t, RuleEnum key) => t[key.name.snakeCase] ?? key.name;
+
+  /// 从 ruleSets 里解析出当前选中的「指定节点/策略组」项（node:/group: 前缀）。
+  String? _selectedNodeTarget(List<String> ruleSets) {
+    for (final item in ruleSets) {
+      if (item.startsWith('node:') || item.startsWith('group:')) return item;
+    }
+    return null;
+  }
+
+  Widget _buildNodeTargetTile(BuildContext context, WidgetRef ref) {
+    final ruleSets = ref.watch(ruleNotifierProvider(ruleListOrder).select((value) => value.ruleSets));
+    final selected = _selectedNodeTarget(ruleSets);
+
+    return ListTile(
+      leading: const Icon(Icons.lan_outlined),
+      title: const Text('指定节点 / 策略组'),
+      subtitle: Text(selected == null ? '未指定（走上方出站方式）' : selected),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (selected != null)
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () {
+                // 移除 node:/group: 项，保留规则集 URL 项
+                final updated = ruleSets.where((item) => !item.startsWith('node:') && !item.startsWith('group:')).toList();
+                ref.read(ruleNotifierProvider(ruleListOrder).notifier).update<List<String>>(RuleEnum.ruleSet, updated);
+              },
+            ),
+          const Icon(Icons.chevron_right),
+        ],
+      ),
+      onTap: () async {
+        final currentTag = selected == null ? null : selected!.replaceFirst(RegExp(r'^(node|group):'), '');
+        final result = await Navigator.of(context).push<String>(
+          MaterialPageRoute(builder: (context) => NodeSelectionPage(selectedTag: currentTag)),
+        );
+        if (result == null || result.isEmpty) return;
+        // 移除旧 node:/group: 项，加入新选中的项
+        final updated = ruleSets.where((item) => !item.startsWith('node:') && !item.startsWith('group:')).toList();
+        updated.add(result);
+        ref.read(ruleNotifierProvider(ruleListOrder).notifier).update<List<String>>(RuleEnum.ruleSet, updated);
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -82,6 +128,8 @@ class RulePage extends HookConsumerWidget {
                 defaultValue: Outbound.direct,
                 t: t.pages.settings.routing.routeRule.rule.outbound,
               ),
+              const SettingDivider(),
+              _buildNodeTargetTile(context, ref),
               const SettingDivider(),
               SettingGenericList<String>(
                 title: RuleEnum.ruleSet.present(t),

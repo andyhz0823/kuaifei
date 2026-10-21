@@ -8,6 +8,7 @@ import 'package:hiddify/core/utils/preferences_utils.dart';
 import 'package:hiddify/features/log/model/log_level.dart';
 import 'package:hiddify/features/profile/data/profile_parser.dart';
 import 'package:hiddify/features/route_rules/data/split_rule_encoder.dart';
+import 'package:hiddify/features/route_rules/notifier/groups_notifier.dart';
 import 'package:hiddify/features/route_rules/notifier/rules_notifier.dart';
 import 'package:hiddify/features/settings/model/config_option_failure.dart';
 import 'package:hiddify/singbox/model/singbox_config_enum.dart';
@@ -426,6 +427,7 @@ abstract class ConfigOptions {
       ...encodeSplitRules(ref.watch(rulesNotifierProvider)),
     ];
     // region 内置规则见 _regionSplitRules()。
+    final groups = ref.watch(groupsNotifierProvider);
 
     final mode = ref.watch(serviceMode);
     // final reg = ref.watch(Preferences.region.notifier).raw();
@@ -505,6 +507,7 @@ abstract class ConfigOptions {
         noiseDelay: ref.watch(warpNoiseDelay),
       ),
       rules: rules,
+      groups: groups,
     );
   });
 }
