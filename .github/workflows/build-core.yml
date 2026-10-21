@@ -84,6 +84,22 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      # gomobile bind 会为 4 个 ABI 各编一份，加上 NDK，ubuntu-latest 默认剩余空间
+      # 不够（实测 "No space left on device" 直接中断）。先清掉 runner 上与本构建
+      # 无关的大件，再装 NDK。
+      - name: Free disk space
+        if: matrix.target == 'android'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "--- before ---"; df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/az /usr/local/share/boost \
+                      /opt/hostedtoolcache/CodeQL \
+                      /usr/local/lib/android/sdk/system-images \
+                      /usr/local/lib/android/sdk/emulator \
+                      /usr/local/lib/android/sdk/ndk || true
+          sudo apt-get clean || true
+          echo "--- after ---"; df -h /
       - uses: actions/setup-go@v5
         with:
           go-version-file: hiddify-core/go.mod
