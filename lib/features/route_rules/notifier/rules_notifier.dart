@@ -38,6 +38,23 @@ class RulesNotifier extends _$RulesNotifier with AppLogger {
     await _updateFile();
   }
 
+  /// 批量导入（预设规则等）：一次性追加，避免多次 addRule 的 listOrder 竞态。
+  Future<void> addRules(List<Rule> rules) async {
+    if (rules.isEmpty) return;
+    final current = state;
+    var order = current.length;
+    final updated = [...current];
+    for (final rule in rules) {
+      rule
+        ..listOrder = order
+        ..enabled = true;
+      order++;
+      updated.add(rule);
+    }
+    state = updated;
+    await _updateFile();
+  }
+
   Future<void> updateRule(Rule rule) async {
     final current = state;
     final index = current.indexWhere((element) => element.listOrder == rule.listOrder);

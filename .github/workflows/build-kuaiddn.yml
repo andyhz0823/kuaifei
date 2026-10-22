@@ -1,0 +1,272 @@
+name: Kuaiddn Build
+
+# kuaiddn 客户端构建与发布：
+# - push 到 kuaify-ddns 分支：只产 Artifact，不发布（日常验证用）
+# - push tag v7.*：构建 + 创建 GitHub Release（版本从 7.0.0 起，7.0.1 / 7.0.2 递增）
+#
+# core 链路与 release-kuaify.yml 一致：build-core.yml 从本分支源码编译 hiddify-core
+# （内容寻址缓存 core-cache-<子树SHA>），纯 Dart 改动命中缓存秒过。
+
+on:
+  push:
+    branches: [kuaify-ddns]
+    tags: ['v7.*']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: kuaiddn-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-core:
+    name: Core
+    uses: ./.github/workflows/build-core.yml
+    permissions:
+      contents: write
+
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      build_number: ${{ steps.ver.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_line="$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')"
+          echo "version=${version_line%%+*}" >> "$GITHUB_OUTPUT"
+          echo "build_number=${version_line#*+}" >> "$GITHUB_OUTPUT"
+
+  build-android:
+    needs: [version, build-core]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Gradle + 自编译 AAR（含 4 个 ABI 的 native 库）+ Flutter 产物会撑爆
+      # ubuntu-latest 的剩余空间，实测在 flutter build apk 阶段
+      # "No space left on device" 直接中断。先清掉与本构建无关的大件。
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "--- before ---"; df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/az /usr/local/share/boost \
+                      /opt/hostedtoolcache/CodeQL \
+                      /usr/local/lib/android/sdk/system-images \
+                      /usr/local/lib/android/sdk/emulator || true
+          sudo apt-get clean || true
+          echo "--- after ---"; df -h /
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.4'
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - name: Restore Android release signing key (if configured)
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" ]]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/key.jks
+            cat > android/key.properties <<EOF
+          storeFile=$GITHUB_WORKSPACE/android/key.jks
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+            echo "release keystore restored"
+          else
+            echo "ANDROID_* secrets not configured; APK will use the Gradle debug key"
+          fi
+      - name: Restore Flutter packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter pub get
+          make gen
+      - name: Fetch custom core (fork build)
+        uses: actions/download-artifact@v4
+        with:
+          name: hiddify-lib-android
+          path: core-dist
+      - name: Install custom Android core
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android/app/libs
+          tar -xzf core-dist/hiddify-lib-android.tar.gz -C android/app/libs
+          ls -la android/app/libs
+          test -f android/app/libs/hiddify-core.aar
+      - name: Build split Android APKs
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: flutter build apk --release --split-per-abi --target lib/main_prod.dart --dart-define=sentry_dsn="$SENTRY_DSN"
+      - name: Stage Android assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "out/kuaiddn-v${VERSION}-r${{ github.run_number }}-android-arm64-v8a.apk"
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "out/kuaiddn-v${VERSION}-r${{ github.run_number }}-android-armeabi-v7a.apk"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: kuaiddn-android
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+  build-windows:
+    needs: [version, build-core]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.4'
+          channel: stable
+          cache: true
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress --yes
+      - name: Fetch custom core (fork build)
+        uses: actions/download-artifact@v4
+        with:
+          name: hiddify-lib-windows-amd64
+          path: core-dist
+      - name: Install custom Windows core
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path hiddify-core/bin | Out-Null
+          tar -xzf core-dist/hiddify-lib-windows-amd64.tar.gz -C hiddify-core/bin
+          Get-ChildItem hiddify-core/bin
+      - name: Assert custom split-rule core is in place
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = 'hiddify-core/bin/hiddify-core.dll'
+          if (-not (Test-Path $dll)) { throw "缺少 $dll" }
+          $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($dll))
+          foreach ($needle in @('outbound-target', 'rule-set-url')) {
+            if (-not $text.Contains($needle)) {
+              throw "core guard 失败：$dll 缺少特征串 '$needle'，说明又拿到了上游预编译产物"
+            }
+          }
+          Write-Host 'core guard OK：自定义分流规则核心已就位'
+      - name: Restore Flutter packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          flutter pub get
+          make gen
+      - name: Build Windows release tree
+        shell: pwsh
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: flutter build windows --release --target lib/main_prod.dart --dart-define=sentry_dsn="$env:SENTRY_DSN"
+      - name: Package Windows portable ZIP and installer
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          BUILD_NUMBER: ${{ needs.version.outputs.build_number }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $PWD 'out'
+          $portable = Join-Path $PWD 'portable\Kuaiddn'
+          New-Item -ItemType Directory -Force -Path $out, $portable | Out-Null
+          Copy-Item 'build\windows\x64\runner\Release\*' $portable -Recurse -Force
+          Compress-Archive -Path "$portable\*" -DestinationPath "$out\kuaiddn-$env:VERSION-r${{ github.run_number }}-portable.zip" -Force
+          & iscc /Qp /DMyAppVersion=$env:VERSION /DMyAppBuild=$env:BUILD_NUMBER kuaiddn_setup.iss
+          $installer = Get-ChildItem -Path (Join-Path $PWD 'dist') -Filter "kuaiddn-$env:VERSION.exe" -Recurse -File | Select-Object -First 1
+          if ($null -eq $installer) {
+            Get-ChildItem -Path (Join-Path $PWD 'dist') -Recurse -File | Select-Object -ExpandProperty FullName
+            throw "Inno Setup did not produce kuaiddn-$env:VERSION.exe under dist"
+          }
+          Copy-Item $installer.FullName "$out\kuaiddn-v$env:VERSION-r${{ github.run_number }}-setup.exe" -Force
+          Set-Content -Path "$out\WINDOWS-PLATFORM-SIGNING-WARNING.txt" -Value @'
+          WARNING: Windows artifacts are not Authenticode-signed in this branch build.
+          This workflow only produces branch-test artifacts; release signing happens in release-kuaify.yml.
+          '@
+      - uses: actions/upload-artifact@v6
+        with:
+          name: kuaiddn-windows
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v7.')
+    needs: [version, build-android, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # gh CLI 需要一个仓库上下文来推断 owner/repo。上一版没有 checkout，
+      # `gh release create` 直接以 "not a git repository" 失败（v7.0.0 实测）。
+      # 这里同时加 checkout 与显式 --repo，双保险。
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          # 只取客户端产物。不加 pattern 会把 build-core 的
+          # hiddify-lib-*.tar.gz 一起打进 Release（v7.0.0 实测多传了 2 个 100MB 的 core 包）。
+          pattern: kuaiddn-*
+      - name: List artifacts
+        shell: bash
+        run: find artifacts -type f | sort
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          NOTES: |
+            节点自动优选：
+            - 登录 / 订阅更新后在本机做吞吐测速（设备直连，不经过代理）
+            - 自动复制出「原名-优选1 … 原名-优选5」节点，只替换 address，host / SNI / path / 端口不变
+            - 优选源支持 cfst-ddns，候选三级降级（优选源 → 内置 CF 边缘 IP → 域名 A 记录）
+            - 结果写盘后不重启核心，当前连接零中断，下次连接生效
+            - 全部候选不可用时保留原节点，链路只会更好不会更差
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find artifacts -type f | sort)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::没有可上传的产物"
+            exit 1
+          fi
+          printf 'uploading %s file(s):\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "release $TAG 已存在，改为覆盖上传产物"
+            gh release upload "$TAG" "${files[@]}" --repo "$REPO" --clobber
+          else
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --title "Kuaiddn $VERSION" \
+              --notes "$NOTES" \
+              "${files[@]}"
+          fi
+          echo "release $TAG 发布完成"

@@ -22,24 +22,27 @@ import (
 //
 //	full:example.com   精确域名        domain:example.com  域名后缀
 //	keyword:ads        域名关键字      regexp:^ads.*        域名正则
-//	geosite:category-ads  geosite 集  ruleset:my-set      远程规则集
+//	geosite:category-ads  ⚠️ 1.12 起忽略    ruleset:my-set      远程规则集
 //	pkg:com.example    Android 包名    proc:example.exe    进程名
 //	procpath:C:\a\b.exe  进程全路径
 //
-// ip 字段：逗号分隔，geoip:cn 走 geoip，其余按 CIDR 处理。
+// ip 字段：逗号分隔，其余按 CIDR 处理。
+// ⚠️ geoip:xx / geosite:xx 在 sing-box 1.12 已被移除，这里只做忽略处理
+// （否则路由初始化会直接失败）；要恢复按地区分流需迁移到 rule-set。
 // port 字段：逗号分隔，1000:2000 为区间，其余为单端口。
 // ---------------------------------------------------------------------------
 
 // SplitRule 是客户端下发的分流规则。
 // 字段名与 Dart 侧 SingboxRule 的序列化结果保持一致（kebab-case）。
 type SplitRule struct {
-	RuleSetUrl string `json:"rule-set-url,omitempty"`
-	Domains    string `json:"domains,omitempty"`
-	Ip         string `json:"ip,omitempty"`
-	Port       string `json:"port,omitempty"`
-	Network    string `json:"network,omitempty"`
-	Protocol   string `json:"protocol,omitempty"`
-	Outbound   string `json:"outbound,omitempty"`
+	RuleSetUrl     string `json:"rule-set-url,omitempty"`
+	Domains        string `json:"domains,omitempty"`
+	Ip             string `json:"ip,omitempty"`
+	Port           string `json:"port,omitempty"`
+	Network        string `json:"network,omitempty"`
+	Protocol       string `json:"protocol,omitempty"`
+	Outbound       string `json:"outbound,omitempty"`
+	OutboundTarget string `json:"outbound-target,omitempty"`
 }
 
 // MakeRouteRule 把一条客户端规则翻译成 sing-box 的 route rule。
@@ -56,8 +59,12 @@ func (r *SplitRule) MakeRouteRule() (option.DefaultRule, bool) {
 	applyDomainMatchers(&raw, splitList(r.Domains))
 
 	for _, item := range splitList(r.Ip) {
+		// 🔴 sing-box 1.12 已移除 geoip 数据库（1.8 弃用 / 1.12 移除）。
+		// 继续写 raw.GeoIP 会让路由初始化直接失败：
+		//   initialize router: parse rule[N]: geoip database is deprecated in sing-box 1.8.0
+		//   and removed in sing-box 1.12.0
+		// 因此这里忽略该项（迁移到 rule-set 之前先保证能启动）。
 		if strings.HasPrefix(item, "geoip:") {
-			raw.GeoIP = append(raw.GeoIP, strings.TrimPrefix(item, "geoip:"))
 			continue
 		}
 		raw.IPCIDR = append(raw.IPCIDR, item)
@@ -129,8 +136,13 @@ func (r *SplitRule) MakeDNSRule() (option.DefaultDNSRule, bool) {
 
 // outboundTarget 解析出站目标。
 // 返回 (outbound tag, action)；action 为空表示这条规则的 outbound 无法识别。
+// 优先级：outbound_target（具体节点/策略组名）> outbound 枚举。
 // 除了固定的 proxy/direct/block，也可直接写节点名（指向具体节点或策略组）。
 func (r *SplitRule) outboundTarget() (string, string) {
+	// 指定节点 / 策略组优先：直接作为 sing-box 的 outbound tag。
+	if target := strings.TrimSpace(r.OutboundTarget); target != "" {
+		return target, C.RuleActionTypeRoute
+	}
 	switch strings.ToLower(strings.TrimSpace(r.Outbound)) {
 	case "proxy":
 		return OutboundMainDetour, C.RuleActionTypeRoute
@@ -201,7 +213,11 @@ func applyDomainMatchers(raw *option.RawDefaultRule, items []string) {
 		case strings.HasPrefix(item, "regexp:"):
 			raw.DomainRegex = append(raw.DomainRegex, strings.TrimPrefix(item, "regexp:"))
 		case strings.HasPrefix(item, "geosite:"):
-			raw.Geosite = append(raw.Geosite, strings.TrimPrefix(item, "geosite:"))
+			// 🔴 sing-box 1.12 移除 geosite 数据库（1.8 弃用 / 1.12 移除）。
+			// 写 raw.Geosite 会让 initialize router 直接报
+			//   parse rule[N]: geosite database is deprecated ... removed in sing-box 1.12.0
+			// 这里忽略该项；只靠 geosite 的规则会因此变成「无匹配条件」而被整体丢弃。
+			continue
 		case strings.HasPrefix(item, "ruleset:"):
 			raw.RuleSet = append(raw.RuleSet, strings.TrimPrefix(item, "ruleset:"))
 		case strings.HasPrefix(item, "pkg:"):
@@ -230,7 +246,11 @@ func applyDomainMatchersDNS(raw *option.RawDefaultDNSRule, items []string) {
 		case strings.HasPrefix(item, "regexp:"):
 			raw.DomainRegex = append(raw.DomainRegex, strings.TrimPrefix(item, "regexp:"))
 		case strings.HasPrefix(item, "geosite:"):
-			raw.Geosite = append(raw.Geosite, strings.TrimPrefix(item, "geosite:"))
+			// 🔴 sing-box 1.12 移除 geosite 数据库（1.8 弃用 / 1.12 移除）。
+			// 写 raw.Geosite 会让 initialize router 直接报
+			//   parse rule[N]: geosite database is deprecated ... removed in sing-box 1.12.0
+			// 这里忽略该项；只靠 geosite 的规则会因此变成「无匹配条件」而被整体丢弃。
+			continue
 		case strings.HasPrefix(item, "ruleset:"):
 			raw.RuleSet = append(raw.RuleSet, strings.TrimPrefix(item, "ruleset:"))
 		default:

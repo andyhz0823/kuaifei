@@ -8,6 +8,7 @@ import 'package:hiddify/core/utils/preferences_utils.dart';
 import 'package:hiddify/features/log/model/log_level.dart';
 import 'package:hiddify/features/profile/data/profile_parser.dart';
 import 'package:hiddify/features/route_rules/data/split_rule_encoder.dart';
+import 'package:hiddify/features/route_rules/notifier/groups_notifier.dart';
 import 'package:hiddify/features/route_rules/notifier/rules_notifier.dart';
 import 'package:hiddify/features/settings/model/config_option_failure.dart';
 import 'package:hiddify/singbox/model/singbox_config_enum.dart';
@@ -21,48 +22,25 @@ abstract class ConfigOptions {
   /// region 内置的分流规则：命中则直连。
   ///
   /// 这是原先被注释掉的写法，配合 core 侧恢复的规则引擎才会真正生效。
+  ///
+  /// 🔴 不要再用 `geosite:` / `geoip:`：sing-box 1.12 已移除这两个数据库，
+  /// 一旦下发，core 启动会直接失败：
+  ///   initialize router: parse rule[N]: geosite database is deprecated in
+  ///   sing-box 1.8.0 and removed in sing-box 1.12.0
+  /// ⇒ 连接时提示「failed to start background core」。
+  /// 目前只按域名后缀（domain:.xx）匹配；要恢复按地区/IP 分流需迁移到 rule-set。
   static List<SingboxRule> _regionSplitRules(Region region) {
     switch (region) {
       case Region.ir:
-        return const [
-          SingboxRule(
-            domains: 'domain:.ir,geosite:ir',
-            ip: 'geoip:ir',
-            outbound: RuleOutbound.bypass,
-          ),
-        ];
+        return const [SingboxRule(domains: 'domain:.ir', outbound: RuleOutbound.bypass)];
       case Region.cn:
-        return const [
-          SingboxRule(
-            domains: 'domain:.cn,geosite:cn',
-            ip: 'geoip:cn',
-            outbound: RuleOutbound.bypass,
-          ),
-        ];
+        return const [SingboxRule(domains: 'domain:.cn', outbound: RuleOutbound.bypass)];
       case Region.ru:
-        return const [
-          SingboxRule(
-            domains: 'domain:.ru',
-            ip: 'geoip:ru',
-            outbound: RuleOutbound.bypass,
-          ),
-        ];
+        return const [SingboxRule(domains: 'domain:.ru', outbound: RuleOutbound.bypass)];
       case Region.af:
-        return const [
-          SingboxRule(
-            domains: 'domain:.af,geosite:af',
-            ip: 'geoip:af',
-            outbound: RuleOutbound.bypass,
-          ),
-        ];
+        return const [SingboxRule(domains: 'domain:.af', outbound: RuleOutbound.bypass)];
       case Region.id:
-        return const [
-          SingboxRule(
-            domains: 'domain:.id,geosite:id',
-            ip: 'geoip:id',
-            outbound: RuleOutbound.bypass,
-          ),
-        ];
+        return const [SingboxRule(domains: 'domain:.id', outbound: RuleOutbound.bypass)];
       default:
         return const [];
     }
@@ -426,6 +404,7 @@ abstract class ConfigOptions {
       ...encodeSplitRules(ref.watch(rulesNotifierProvider)),
     ];
     // region 内置规则见 _regionSplitRules()。
+    final groups = ref.watch(groupsNotifierProvider);
 
     final mode = ref.watch(serviceMode);
     // final reg = ref.watch(Preferences.region.notifier).raw();
@@ -505,6 +484,7 @@ abstract class ConfigOptions {
         noiseDelay: ref.watch(warpNoiseDelay),
       ),
       rules: rules,
+      groups: groups,
     );
   });
 }

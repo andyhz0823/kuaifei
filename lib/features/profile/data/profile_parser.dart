@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:hiddify/core/db/db.dart';
 import 'package:hiddify/core/http_client/dio_http_client.dart';
+import 'package:hiddify/features/front_door/data/front_door_runner.dart';
 import 'package:hiddify/features/profile/data/profile_data_mapper.dart';
 import 'package:hiddify/features/profile/model/profile_entity.dart';
 import 'package:hiddify/features/profile/model/profile_failure.dart';
@@ -251,21 +252,26 @@ class ProfileParser {
       final newContent = results.join("\n");
       await File(tempFilePath).writeAsString(newContent);
     }
+
+    // 节点自动优选：把命中关键词的 vless+ws+tls 节点复制成「优选1–N」，
+    // 连接地址依次换成实测最快的 CF 边缘 IP，host / SNI / path / 端口不变。
+    // 必须在这里改：往下走 validateConfig 之后文件会变成编译后的 sing-box JSON，
+    // 届时已无 vless:// 行，克隆节点也不会被选择器自动收录。
+    // 失败不影响订阅更新（runner 内部已兜住所有异常）。
+    await runFrontDoor(ref, profilePath: tempFilePath);
   }
 
   static String _safeSubscriptionUserAgent(String userAgent) {
     final trimmed = userAgent.trim();
-    if (trimmed.isEmpty) return 'hiddify/4.1.0';
+    if (trimmed.isEmpty) return 'v2rayn/4.1.0';
 
-    // Xboard selects the subscription generator from either ?flag= or the
-    // User-Agent. The default app UA intentionally advertises several client
-    // families ("like ClashMeta v2ray sing-box"). That is good for generic
-    // compatibility, but Xboard may choose ClashMeta before SingBox and omit the
-    // native sing-box ECH object. For Kuaifei's own profile import we request
-    // the Hiddify/SingBox generator explicitly while preserving the app version.
+    // Xboard 按 ?flag= 或 User-Agent 选择订阅生成协议。外部订阅节点只在
+    // General 协议（base64 URI）下合并（ClientController 对非 General 协议
+    // 直接 return），故这里统一用 v2rayn（General 协议）拉取完整节点列表，
+    // 而不是 hiddify/sing-box（那会走 SingBox 协议、丢失全部外部订阅节点）。
     final versionMatch = RegExp(r'/(v?\d+(?:\.\d+){0,3})').firstMatch(trimmed);
     final version = versionMatch?.group(1)?.replaceFirst(RegExp('^v', caseSensitive: false), '') ?? '4.1.0';
-    return 'hiddify/$version';
+    return 'v2rayn/$version';
   }
 
   static Either<ProfileFailure, Map<String, dynamic>> populateHeaders({

@@ -256,13 +256,6 @@ class _AccountSection extends ConsumerWidget {
                 ),
                 Divider(height: 1, indent: 0, color: theme.colorScheme.outlineVariant),
                 ListTile(
-                  leading: Icon(Icons.dns_outlined, color: theme.colorScheme.primary),
-                  title: Text(panelUrl),
-                  subtitle: const Text('面板地址'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-                Divider(height: 1, indent: 0, color: theme.colorScheme.outlineVariant),
-                ListTile(
                   leading: Icon(Icons.logout_rounded, color: theme.colorScheme.error),
                   title: Text('退出登录', style: TextStyle(color: theme.colorScheme.error)),
                   contentPadding: EdgeInsets.zero,

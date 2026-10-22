@@ -14,6 +14,6 @@ void main() {
       environment: Environment.prod,
     );
 
-    expect(appInfo.displayNameWithVersion, 'Kuaifei v4.1.6');
+    expect(appInfo.displayNameWithVersion, 'Kuaify v4.1.6');
   });
 }
