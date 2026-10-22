@@ -228,6 +228,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          # 只取客户端产物。不加 pattern 会把 build-core 的
+          # hiddify-lib-*.tar.gz 一起打进 Release（v7.0.0 实测多传了 2 个 100MB 的 core 包）。
+          pattern: kuaiddn-*
       - name: List artifacts
         shell: bash
         run: find artifacts -type f | sort
