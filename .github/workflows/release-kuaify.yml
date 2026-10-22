@@ -3,7 +3,9 @@ name: Kuaify Release
 on:
   push:
     tags:
-      - 'v*'
+      # 只吃 kuaify 版本段（v5.x）。kuaiddn 走 v7.x 与 build-kuaiddn.yml，
+      # 用 'v*' 会让 v7.0.0 同时触发两个 release 流程，抢同一个 GitHub Release。
+      - 'v5.*'
   workflow_dispatch:
     inputs:
       tag:
