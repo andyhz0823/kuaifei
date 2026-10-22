@@ -19,7 +19,7 @@ class EdgeProbe {
   const EdgeProbe._();
 
   /// v2：v1 是「只测握手」的版本，缓存里可能混入了返 403 的边缘，直接弃用。
-  static const preferenceKey = 'origin_edge_ip_cache_v2';
+  static const preferenceKey = 'origin_edge_ip_cache_v3';
   static const cacheTtl = Duration(hours: 6);
   static const keepCount = 3;
 
@@ -88,26 +88,39 @@ class EdgeProbe {
     }
   }
 
-  /// 读取缓存：`{"ips": [...], "at": <epoch ms>}`，过期返回空。
-  static List<String> readCache(SharedPreferences preferences) {
+  /// 读取缓存：`{"hosts": {"<host>": ["ip", ...]}, "at": <epoch ms>}`，过期返回空。
+  static Map<String, List<String>> readCache(SharedPreferences preferences) {
     final raw = preferences.getString(preferenceKey);
-    if (raw == null || raw.isEmpty) return const [];
+    if (raw == null || raw.isEmpty) return const {};
     try {
       final decoded = jsonDecode(raw);
-      if (decoded is! Map) return const [];
-      final ips = decoded['ips'];
+      if (decoded is! Map) return const {};
+      final hosts = decoded['hosts'];
       final at = decoded['at'];
-      if (ips is! List || at is! num) return const [];
+      if (hosts is! Map || at is! num) return const {};
       final cachedAt = DateTime.fromMillisecondsSinceEpoch(at.toInt());
-      if (DateTime.now().difference(cachedAt) > cacheTtl) return const [];
-      return ips.whereType<String>().where((ip) => InternetAddress.tryParse(ip) != null).toList(growable: false);
+      if (DateTime.now().difference(cachedAt) > cacheTtl) return const {};
+      final result = <String, List<String>>{};
+      for (final entry in hosts.entries) {
+        final ips = entry.value;
+        if (ips is! List) continue;
+        final valid = ips
+            .whereType<String>()
+            .where((ip) => InternetAddress.tryParse(ip) != null)
+            .toList(growable: false);
+        if (valid.isNotEmpty) result[entry.key.toString()] = valid;
+      }
+      return Map<String, List<String>>.unmodifiable(result);
     } catch (_) {
-      return const [];
+      return const {};
     }
   }
 
-  static Future<void> writeCache(SharedPreferences preferences, List<String> ips) async {
-    if (ips.isEmpty) return;
-    await preferences.setString(preferenceKey, jsonEncode({'ips': ips, 'at': DateTime.now().millisecondsSinceEpoch}));
+  static Future<void> writeCache(SharedPreferences preferences, Map<String, List<String>> hosts) async {
+    if (hosts.isEmpty) return;
+    await preferences.setString(
+      preferenceKey,
+      jsonEncode({'hosts': hosts, 'at': DateTime.now().millisecondsSinceEpoch}),
+    );
   }
 }
