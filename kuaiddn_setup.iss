@@ -12,15 +12,15 @@
 [Setup]
 AppId={{6L903538-42B1-4596-G479-BJ779F21A65D}}
 AppVersion={#MyAppVersion}
-AppName=Kuaify
-AppPublisher=Kuaify
+AppName=Kuaiddn
+AppPublisher=Kuaiddn
 AppPublisherURL=https://github.com/andyhz0823/Xboard
 AppSupportURL=https://github.com/andyhz0823/Xboard
 AppUpdatesURL=https://xz.kuaity.top/Downloads/
-DefaultDirName={autopf64}\Kuaify
+DefaultDirName={autopf64}\Kuaiddn
 DisableProgramGroupPage=yes
 OutputDir=dist\{#MyAppVersion}+{#MyAppBuild}
-OutputBaseFilename=kuaify-{#MyAppVersion}
+OutputBaseFilename=kuaiddn-{#MyAppVersion}
 Compression=lzma
 SolidCompression=yes
 SetupIconFile=windows\runner\resources\app_icon.ico
@@ -31,10 +31,10 @@ ArchitecturesInstallIn64BitMode=x64
 CloseApplications=force
 VersionInfoVersion={#MyAppVersion}.0
 VersionInfoProductVersion={#MyAppVersion}.0
-VersionInfoDescription=Kuaify
-VersionInfoProductName=Kuaify
-VersionInfoCompany=Kuaify
-VersionInfoOriginalFileName=kuaify-{#MyAppVersion}.exe
+VersionInfoDescription=Kuaiddn
+VersionInfoProductName=Kuaiddn
+VersionInfoCompany=Kuaiddn
+VersionInfoOriginalFileName=kuaiddn-{#MyAppVersion}.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -47,9 +47,9 @@ Name: "launchAtStartup"; Description: "Auto-start at login"; GroupDescription: "
 Source: "build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\Kuaify"; Filename: "{app}\kuaify.exe"
-Name: "{autodesktop}\Kuaify"; Filename: "{app}\kuaify.exe"; Tasks: desktopicon
-Name: "{userstartup}\Kuaify"; Filename: "{app}\kuaify.exe"; WorkingDir: "{app}"; Tasks: launchAtStartup
+Name: "{autoprograms}\Kuaiddn"; Filename: "{app}\kuaify.exe"
+Name: "{autodesktop}\Kuaiddn"; Filename: "{app}\kuaify.exe"; Tasks: desktopicon
+Name: "{userstartup}\Kuaiddn"; Filename: "{app}\kuaify.exe"; WorkingDir: "{app}"; Tasks: launchAtStartup
 
 [Run]
 Filename: "{app}\kuaify.exe"; Description: "Launch kuaify"; Flags: runascurrentuser nowait postinstall skipifsilent

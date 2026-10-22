@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 abstract class Constants {
-  static const appName = "Kuaify";
+  static const appName = "Kuaiddn";
   static const githubUrl = "https://github.com/andyhz0823/Xboard";
   static const licenseUrl = "https://github.com/andyhz0823/Xboard";
   static const githubReleasesApiUrl = "https://api.github.com/repos/andyhz0823/Xboard/releases";

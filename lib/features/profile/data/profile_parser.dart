@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:hiddify/core/db/db.dart';
 import 'package:hiddify/core/http_client/dio_http_client.dart';
+import 'package:hiddify/features/front_door/data/front_door_runner.dart';
 import 'package:hiddify/features/profile/data/profile_data_mapper.dart';
 import 'package:hiddify/features/profile/model/profile_entity.dart';
 import 'package:hiddify/features/profile/model/profile_failure.dart';
@@ -251,6 +252,13 @@ class ProfileParser {
       final newContent = results.join("\n");
       await File(tempFilePath).writeAsString(newContent);
     }
+
+    // 节点自动优选：把命中关键词的 vless+ws+tls 节点复制成「优选1–N」，
+    // 连接地址依次换成实测最快的 CF 边缘 IP，host / SNI / path / 端口不变。
+    // 必须在这里改：往下走 validateConfig 之后文件会变成编译后的 sing-box JSON，
+    // 届时已无 vless:// 行，克隆节点也不会被选择器自动收录。
+    // 失败不影响订阅更新（runner 内部已兜住所有异常）。
+    await runFrontDoor(ref, profilePath: tempFilePath);
   }
 
   static String _safeSubscriptionUserAgent(String userAgent) {

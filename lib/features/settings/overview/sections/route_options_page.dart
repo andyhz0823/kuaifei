@@ -4,6 +4,7 @@ import 'package:hiddify/core/localization/translations.dart';
 import 'package:hiddify/core/model/region.dart';
 import 'package:hiddify/core/preferences/general_preferences.dart';
 import 'package:hiddify/core/router/dialog/dialog_notifier.dart';
+import 'package:hiddify/features/front_door/overview/front_door_section.dart';
 import 'package:hiddify/features/per_app_proxy/model/per_app_proxy_mode.dart';
 import 'package:hiddify/features/per_app_proxy/overview/per_app_proxy_notifier.dart';
 import 'package:hiddify/features/settings/data/config_option_repository.dart';
@@ -108,6 +109,7 @@ class RouteOptionsPage extends HookConsumerWidget {
             icon: Icons.looks_6_rounded,
             presentChoice: (value) => value.present(t),
           ),
+          const FrontDoorSection(),
         ],
       ),
     );
