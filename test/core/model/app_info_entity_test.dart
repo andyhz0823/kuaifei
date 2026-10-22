@@ -5,7 +5,7 @@ import 'package:hiddify/core/model/environment.dart';
 void main() {
   test('uses one display value for the brand and package version', () {
     const appInfo = AppInfoEntity(
-      name: 'kuaifei',
+      name: 'kuaify',
       version: '4.1.6',
       buildNumber: '40106',
       release: Release.general,

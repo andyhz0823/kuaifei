@@ -227,7 +227,7 @@ def main() -> int:
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">\n'
         "  <channel>\n"
-        "    <title>Kuaifei Release</title>\n"
+        "    <title>Kuaify Release</title>\n"
         f"{items}"
         "  </channel>\n"
         "</rss>\n"
