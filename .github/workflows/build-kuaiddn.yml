@@ -219,6 +219,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      # gh CLI 需要一个仓库上下文来推断 owner/repo。上一版没有 checkout，
+      # `gh release create` 直接以 "not a git repository" 失败（v7.0.0 实测）。
+      # 这里同时加 checkout 与显式 --repo，双保险。
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -229,18 +235,35 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.version.outputs.version }}
           TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          NOTES: |
+            节点自动优选：
+            - 登录 / 订阅更新后在本机做吞吐测速（设备直连，不经过代理）
+            - 自动复制出「原名-优选1 … 原名-优选5」节点，只替换 address，host / SNI / path / 端口不变
+            - 优选源支持 cfst-ddns，候选三级降级（优选源 → 内置 CF 边缘 IP → 域名 A 记录）
+            - 结果写盘后不重启核心，当前连接零中断，下次连接生效
+            - 全部候选不可用时保留原节点，链路只会更好不会更差
         run: |
           set -euo pipefail
-          cat > RELEASE_NOTES.md <<'NOTES'
-          节点自动优选：
-          - 登录 / 订阅更新后在本机做吞吐测速（设备直连，不经过代理）
-          - 自动复制出「原名-优选1 … 原名-优选5」节点，只替换 address，host / SNI / path / 端口不变
-          - 优选源支持 cfst-ddns，候选三级降级（优选源 → 内置 CF 边缘 IP → 域名 A 记录）
-          - 结果写盘后不重启核心，当前连接零中断，下次连接生效
-          - 全部候选不可用时保留原节点，链路只会更好不会更差
-          NOTES
           mapfile -t files < <(find artifacts -type f | sort)
-          printf 'uploading %s file(s)\n' "${#files[@]}"
-          gh release create "$TAG" --title "Kuaiddn $VERSION" --notes-file RELEASE_NOTES.md "${files[@]}"
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::没有可上传的产物"
+            exit 1
+          fi
+          printf 'uploading %s file(s):\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "release $TAG 已存在，改为覆盖上传产物"
+            gh release upload "$TAG" "${files[@]}" --repo "$REPO" --clobber
+          else
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --title "Kuaiddn $VERSION" \
+              --notes "$NOTES" \
+              "${files[@]}"
+          fi
+          echo "release $TAG 发布完成"
