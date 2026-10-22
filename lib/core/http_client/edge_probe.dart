@@ -8,22 +8,25 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///
 /// 背景：面板域名（`www.kuaify.cc.cd`）与订阅域名（`*.tkyayun.cc.cd`）都走 CF 代理，
 /// DNS 被污染时客户端只能靠写死的边缘 IP 兜底。CF 是 anycast + 按 SNI 路由，
-/// **任意** CF 边缘 IP 都能服务任意 zone，所以可以探测一批已知边缘 IP，
-/// 挑当前网络下 TLS 握手最快的几个缓存起来，DNS 挂掉时直接拨这些 IP。
+/// 大部分边缘 IP 都能服务任意 zone，所以可以探测一批已知边缘 IP，
+/// 挑当前网络下**真正能用**且最快的几个缓存起来。
 ///
-/// 说明：探测阶段 `onBadCertificate` 放行只是为了测「这个边缘能不能完成握手」，
-/// 用来排序；真正收发数据仍然走正常的 TLS 校验（dio / HttpClient 默认行为）。
+/// 🔴 必须验证 HTTP 状态码，不能只看 TLS 握手：
+/// 实测 `104.16.132.229` / `104.19.192.29` / `162.159.36.1` / `162.159.46.1`
+/// 这些边缘能完成握手，但对我们的 zone 直接返回 **403**。
+/// 只测握手会把它们选进来，导致登录/订阅全部 403（5.0.4 就是这样翻车的）。
 class EdgeProbe {
   const EdgeProbe._();
 
-  static const preferenceKey = 'origin_edge_ip_cache_v1';
+  /// v2：v1 是「只测握手」的版本，缓存里可能混入了返 403 的边缘，直接弃用。
+  static const preferenceKey = 'origin_edge_ip_cache_v2';
   static const cacheTtl = Duration(hours: 6);
   static const keepCount = 3;
 
-  static const _timeout = Duration(seconds: 2);
+  static const _timeout = Duration(seconds: 3);
 
   /// 候选边缘 IP：覆盖 104.16~104.22 / 172.66~172.67 / 188.114 / 162.159 网段，
-  /// 前两个是我们两个 zone 当前解析到的地址（作为基准）。
+  /// 前四个是我们两个 zone 当前解析到的地址（作为基准）。
   static const candidateAddresses = <String>[
     '104.21.84.66',
     '172.67.187.171',
@@ -42,40 +45,46 @@ class EdgeProbe {
     '162.159.46.1',
   ];
 
-  /// 对 [sniHost] 逐个候选 IP 做 TLS 握手计时，返回最快的 [keepCount] 个地址。
-  static Future<List<String>> probe(String sniHost, {int keep = keepCount}) async {
-    final host = sniHost.trim().toLowerCase();
-    if (host.isEmpty) return const [];
+  /// 对每个候选 IP 发一次真实 HTTPS 请求（[probeUri]，通常是 bootstrap 接口），
+  /// 只有返回 200 的才算可用，再按耗时排序取最快的 [keep] 个。
+  static Future<List<String>> probe(Uri probeUri, {int keep = keepCount}) async {
+    if (probeUri.scheme != 'https' || probeUri.host.isEmpty) return const [];
 
     final results = await Future.wait(
-      candidateAddresses.map((address) async => MapEntry(address, await _handshakeMs(address, host))),
+      candidateAddresses.map((address) async => MapEntry(address, await _probeMs(address, probeUri))),
     );
 
-    final reachable = results.where((entry) => entry.value > 0).toList()
+    final reachable = results.where((entry) => entry.value >= 0).toList()
       ..sort((left, right) => left.value.compareTo(right.value));
 
     if (reachable.isEmpty) return const [];
     return reachable.take(keep).map((entry) => entry.key).toList(growable: false);
   }
 
-  /// 返回握手毫秒数；失败返回 -1。
-  static Future<int> _handshakeMs(String address, String sniHost) async {
-    Socket? raw;
-    SecureSocket? secure;
+  /// 返回「握手 + 首字节」耗时（毫秒）；非 200 或异常返回 -1。
+  static Future<int> _probeMs(String address, Uri probeUri) async {
+    HttpClient? client;
     try {
+      client = HttpClient()..connectionTimeout = _timeout;
+      // 强制连到候选 IP，但 URI 的 host 保持不变 ⇒ TLS SNI 与 Host 头仍是真实域名。
+      client.connectionFactory = (requestUri, proxyHost, proxyPort) async {
+        final socket = await Socket.connect(address, 443, timeout: _timeout);
+        return ConnectionTask.fromSocket(Future<Socket>.value(socket), () {});
+      };
+
       final stopwatch = Stopwatch()..start();
-      raw = await Socket.connect(address, 443, timeout: _timeout);
-      // 注意：SecureSocket.secure 没有 timeout 具名参数（SDK 差异），用 Future.timeout 兜住。
-      secure = await SecureSocket.secure(raw, host: sniHost, onBadCertificate: (_) => true).timeout(_timeout);
+      final request = await client.getUrl(probeUri).timeout(_timeout);
+      final response = await request.close().timeout(_timeout);
+      await response.drain<void>().timeout(_timeout);
       stopwatch.stop();
+
+      // 403 / 521 等一律视为不可用。
+      if (response.statusCode != HttpStatus.ok) return -1;
       return stopwatch.elapsedMilliseconds;
     } catch (_) {
       return -1;
     } finally {
-      try {
-        await secure?.close();
-      } catch (_) {}
-      raw?.destroy();
+      client?.close(force: true);
     }
   }
 

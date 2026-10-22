@@ -58,9 +58,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   /// CF 边缘 IP 自动优选：只在缓存缺失/过期时探测一次（结果 6 小时有效）。
   void _warmEdgeCacheIfNeeded() {
     if (KuaifeiOrigin.hasProbedEdgeAddresses) return;
-    final host = Uri.tryParse(Constants.panelBaseUrl)?.host;
-    if (host == null || host.isEmpty) return;
-    unawaited(KuaifeiOrigin.refreshEdgeCache(_prefs, sniHost: host));
+    final probeUri = Uri.tryParse(Constants.bootstrapUrl);
+    if (probeUri == null) return;
+    unawaited(KuaifeiOrigin.refreshEdgeCache(_prefs, probeUri: probeUri));
   }
 
   String? _readPanelUrl() => _prefs.getString('auth_panel_url');

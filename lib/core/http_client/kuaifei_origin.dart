@@ -333,19 +333,25 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
     }
   }
 
-  /// 探测一批 CF 边缘 IP，挑当前网络最快的几个缓存起来（6 小时有效）。
+  /// 探测一批 CF 边缘 IP，挑当前网络**真正可用**（HTTP 200）且最快的几个缓存起来
+  /// （6 小时有效）。
   ///
-  /// [sniHost] 用面板域名即可：CF 是 anycast + 按 SNI 路由，任意边缘 IP 都能
-  /// 服务我们的 zone，所以同一组结果对订阅域名同样适用。
-  static Future<void> refreshEdgeCache(SharedPreferences preferences, {required String sniHost}) async {
+  /// [probeUri] 用面板的 bootstrap 接口即可：CF 是 anycast + 按 SNI 路由，
+  /// 能服务面板 zone 的边缘对订阅域名同样适用。
+  static Future<void> refreshEdgeCache(SharedPreferences preferences, {required Uri probeUri}) async {
     try {
-      final best = await EdgeProbe.probe(sniHost);
+      final best = await EdgeProbe.probe(probeUri);
       if (best.isEmpty) return;
       _probedEdgeAddresses = best;
       await EdgeProbe.writeCache(preferences, best);
     } catch (_) {
       // 探测失败就继续用写死的兜底地址。
     }
+  }
+
+  /// 优选结果被边缘拒绝（403/521 等）时清掉，立刻回到写死的兜底地址。
+  static void clearEdgeCache() {
+    _probedEdgeAddresses = const [];
   }
 
   static bool get hasProbedEdgeAddresses => _probedEdgeAddresses.isNotEmpty;
