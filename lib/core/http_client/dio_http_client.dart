@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:dio_smart_retry/dio_smart_retry.dart';
-import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/http_client/kuaify_origin.dart';
 import 'package:hiddify/features/auth/data/login_doh_resolver.dart';
 import 'package:hiddify/utils/custom_loggers.dart';
 
@@ -31,11 +31,7 @@ class DioHttpClient with InfraLogger {
   String? _subscriptionFallbackBaseUrl;
   Future<String?>? _subscriptionEndpointDiscovery;
 
-  DioHttpClient({
-    required Duration timeout,
-    required this.userAgent,
-    required bool debug,
-  }) {
+  DioHttpClient({required Duration timeout, required this.userAgent, required bool debug}) {
     _dohResolver = LoginDohResolver(timeout: const Duration(seconds: 2));
     for (final mode in ['proxy', 'direct', 'both']) {
       _dio[mode] = Dio(
@@ -72,18 +68,9 @@ class DioHttpClient with InfraLogger {
       );
     }
 
-    _fastDirectDio = _createFastTransportDio(
-      mode: 'direct',
-      timeout: subscriptionFallbackBudget,
-    );
-    _fastProxyDio = _createFastTransportDio(
-      mode: 'proxy',
-      timeout: subscriptionFallbackBudget,
-    );
-    _subscriptionProbeDio = _createFastTransportDio(
-      mode: 'direct',
-      timeout: subscriptionEndpointProbeBudget,
-    );
+    _fastDirectDio = _createFastTransportDio(mode: 'direct', timeout: subscriptionFallbackBudget);
+    _fastProxyDio = _createFastTransportDio(mode: 'proxy', timeout: subscriptionFallbackBudget);
+    _subscriptionProbeDio = _createFastTransportDio(mode: 'direct', timeout: subscriptionEndpointProbeBudget);
 
     _mappedDio = Dio(
       BaseOptions(
@@ -95,7 +82,7 @@ class DioHttpClient with InfraLogger {
     );
     _mappedDio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
-        final client = HttpClient(context: KuaifeiOrigin.securityContext)
+        final client = HttpClient(context: KuaifyOrigin.securityContext)
           ..connectionTimeout = mappedConnectionBudget
           ..findProxy = (_) => 'DIRECT';
         client.connectionFactory = (uri, proxyHost, proxyPort) async {
@@ -177,13 +164,19 @@ class DioHttpClient with InfraLogger {
     Object? lastError;
     StackTrace? lastStackTrace;
     try {
-      loggy.debug('Subscription download fallback: trying direct transport for ${Uri.tryParse(url)?.host ?? 'unknown host'}');
+      loggy.debug(
+        'Subscription download fallback: trying direct transport for ${Uri.tryParse(url)?.host ?? 'unknown host'}',
+      );
       return await _fastDirectDio.download(url, path, cancelToken: cancelToken, options: options);
     } catch (error, stackTrace) {
       if (_isCancelled(error)) rethrow;
       lastError = error;
       lastStackTrace = stackTrace;
-      loggy.warning('Direct subscription download failed for ${Uri.tryParse(url)?.host ?? 'unknown host'}', error, stackTrace);
+      loggy.warning(
+        'Direct subscription download failed for ${Uri.tryParse(url)?.host ?? 'unknown host'}',
+        error,
+        stackTrace,
+      );
     }
 
     if (port > 0 && await isPortOpen('127.0.0.1', port, timeout: const Duration(seconds: 1))) {
@@ -221,7 +214,7 @@ class DioHttpClient with InfraLogger {
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.isScheme('https') || uri.host.isEmpty) return null;
 
-    final endpoints = KuaifeiOrigin.config.authEndpoints.where((endpoint) => endpoint.supportsSubscription).toList();
+    final endpoints = KuaifyOrigin.config.authEndpoints.where((endpoint) => endpoint.supportsSubscription).toList();
     final knownHosts = endpoints.map((endpoint) => Uri.tryParse(endpoint.url)?.host).whereType<String>().toSet();
     if (!knownHosts.contains(uri.host)) return null;
 
@@ -361,6 +354,15 @@ class DioHttpClient with InfraLogger {
       return response;
     } catch (error, stackTrace) {
       if (_isCancelled(error)) rethrow;
+      if (_isMappedEdgeRejection(error)) {
+        // 边缘 IP 能握手但被 CF 拒（403 / 52x）：说明自动优选出来的这组 IP
+        // 对这个 zone 不可用，立刻丢弃并冷却，改走正常解析。
+        KuaifyOrigin.clearEdgeCache();
+        final retryAt = DateTime.now().add(mappedHostFailureCooldown);
+        _mappedHostUnavailableUntil[host] = retryAt;
+        loggy.warning('Mapped $action rejected by edge for $host; cleared preferred edge IPs until $retryAt');
+        return null;
+      }
       if (_isMappedConnectionFailure(error)) {
         final retryAt = DateTime.now().add(mappedHostFailureCooldown);
         _mappedHostUnavailableUntil[host] = retryAt;
@@ -376,6 +378,15 @@ class DioHttpClient with InfraLogger {
 
   bool _isCancelled(Object error) {
     return error is DioException && (CancelToken.isCancel(error) || error.type == DioExceptionType.cancel);
+  }
+
+  /// 映射传输收到「边缘拒绝」类状态码：403（zone 未在该边缘生效/被 WAF 拦）
+  /// 或 52x（CF 回源/连接错误）。这类错误说明 IP 选错了，不是网络不通。
+  bool _isMappedEdgeRejection(Object error) {
+    if (error is! DioException) return false;
+    final status = error.response?.statusCode;
+    if (status == null) return false;
+    return status == 403 || status == 421 || (status >= 520 && status <= 527);
   }
 
   bool _isMappedConnectionFailure(Object error) {
@@ -426,7 +437,7 @@ class DioHttpClient with InfraLogger {
 
   bool _hasMappedEndpoint(String url) {
     final host = _hostForUrl(url);
-    return host != null && KuaifeiOrigin.connectionAddressesForHost(host).isNotEmpty;
+    return host != null && KuaifyOrigin.connectionAddressesForHost(host).isNotEmpty;
   }
 
   bool _canDohBootstrap(String url) {
@@ -436,7 +447,7 @@ class DioHttpClient with InfraLogger {
   }
 
   Future<Socket> _connectMapped(Uri uri) async {
-    final configured = KuaifeiOrigin.connectionAddressesForHost(
+    final configured = KuaifyOrigin.connectionAddressesForHost(
       uri.host,
     ).map(InternetAddress.new).toList(growable: false);
     final addresses = configured.isNotEmpty ? configured : await _resolveDohAddresses(uri.host);
@@ -481,6 +492,6 @@ class DioHttpClient with InfraLogger {
 
   Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {
     if (!uri.isScheme('https')) return Future.value(socket);
-    return SecureSocket.secure(socket, host: uri.host, context: KuaifeiOrigin.securityContext);
+    return SecureSocket.secure(socket, host: uri.host, context: KuaifyOrigin.securityContext);
   }
 }

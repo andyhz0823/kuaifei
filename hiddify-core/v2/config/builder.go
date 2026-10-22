@@ -331,6 +331,20 @@ func setOutbounds(options *option.Options, input *option.Options, opt *HiddifyOp
 	}
 	outbounds = append([]option.Outbound{selector}, outbounds...)
 
+	// 用户自定义策略组：把组名作为 outbound tag 注册，分流规则可通过
+	// outbound-target 指向它。仅保留当前订阅里真实存在的节点成员。
+	if len(opt.Groups) > 0 {
+		available := make(map[string]bool, len(tags))
+		for _, tag := range tags {
+			available[tag] = true
+		}
+		for _, group := range opt.Groups {
+			if groupOut, ok := group.makeOutbound(available); ok {
+				outbounds = append(outbounds, groupOut)
+			}
+		}
+	}
+
 	options.Endpoints = endpoints
 	options.Outbounds = append(
 		outbounds,
@@ -587,7 +601,7 @@ func setRoutingOptions(options *option.Options, hopt *HiddifyOptions) error {
 	// 	// 	option.Rule{
 	// 	// 		Type: C.RuleTypeDefault,
 	// 	// 		DefaultOptions: option.DefaultRule{
-	// 	// 			ProcessName: []string{"kuaifei", "kuaifei.exe", "KuaifeiCli", "KuaifeiCli.exe"},
+	// 	// 			ProcessName: []string{"kuaify", "kuaify.exe", "KuaifyCli", "KuaifyCli.exe"},
 	// 	// 			Outbound:    OutboundBypassTag,
 	// 	// 		},
 	// 	// 	},

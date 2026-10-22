@@ -7,7 +7,7 @@ import 'package:hiddify/core/app_info/app_info_provider.dart';
 import 'package:hiddify/core/db/db.dart';
 import 'package:hiddify/core/db/provider/db_providers.dart';
 import 'package:hiddify/core/directories/directories_provider.dart';
-import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/http_client/kuaify_origin.dart';
 import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/core/preferences/preferences_provider.dart';
 import 'package:hiddify/features/auth/data/origin_dns_bootstrap.dart';
@@ -27,10 +27,10 @@ final authNotifierProvider = AsyncNotifierProvider<AuthNotifier, AuthStatus>(() 
 
 class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   static const _loginTimeout = Duration(seconds: 25);
-  static const _loginTimeoutMessage = '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.kuaifei.top';
+  static const _loginTimeoutMessage = '登录失败，请检查网络后重试';
   // ignore: unused_field
   static const _defaultPurchaseUrl = Constants.purchaseUrl;
-  static const _legacyPurchaseUrl = 'https://kuaifei.top';
+  static const _legacyPurchaseUrl = 'https://www.kuaify.cc.cd';
   static const _defaultContactEmail = 'wahiya562@gmail.com';
   static const _legacyContactEmail = 'mahiya562@gmail.com';
   static const _profileRefreshInterval = Duration(minutes: 30);
@@ -42,7 +42,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
 
   @override
   Future<AuthStatus> build() async {
-    KuaifeiOrigin.restore(_prefs);
+    KuaifyOrigin.restore(_prefs);
+    // 后台探测 CF 边缘 IP（缓存 6 小时有效），不阻塞启动。
+    _warmEdgeCacheIfNeeded();
     ref.onDispose(() {
       _originRefreshTimer?.cancel();
       _profileRefreshTimer?.cancel();
@@ -52,6 +54,13 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   }
 
   SharedPreferences get _prefs => ref.read(sharedPreferencesProvider).requireValue;
+
+  /// CF 边缘 IP 自动优选：只在缓存缺失/过期时探测一次（结果 6 小时有效）。
+  void _warmEdgeCacheIfNeeded() {
+    if (KuaifyOrigin.hasProbedEdgeAddresses) return;
+    final probeUris = <Uri>[Uri.parse(Constants.bootstrapUrl), Uri.parse(Constants.backupBootstrapUrl)];
+    unawaited(KuaifyOrigin.refreshEdgeCache(_prefs, probeUris: probeUris));
+  }
 
   String? _readPanelUrl() => _prefs.getString('auth_panel_url');
   String? _readSanctumToken() => _prefs.getString('auth_sanctum_token');
@@ -78,6 +87,10 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     if (normalized == null || normalized.isEmpty || normalized == _legacyPurchaseUrl) {
       return Constants.purchaseUrl;
     }
+    // 服务端可能下发别的品牌的续费页（历史上是 216 的 xz.kuaity.top），
+    // 非本品牌域名一律丢弃，回落到 kuaify 自己的面板。
+    final host = Uri.tryParse(normalized)?.host ?? '';
+    if (!KuaifyOrigin.isBrandHost(host)) return Constants.purchaseUrl;
     return normalized;
   }
 
@@ -132,6 +145,8 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       // Authentication is complete once credentials and subscription metadata
       // are durable. Profile downloads can be slow and must run in background.
       loggy.debug('Auth: login successful for $email');
+      // 登录成功说明网络可用，顺手刷新一次边缘 IP 优选结果。
+      _warmEdgeCacheIfNeeded();
       _scheduleRefreshes();
       unawaited(_syncProfilesAfterLogin());
       return AuthStatus.authenticated;
@@ -181,9 +196,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   Future<bool> _persistOriginDns(XboardSubscribeResult subscribeResult) async {
     final config = subscribeResult.appConfig.originDns;
     if (config == null || !config.isUsable) return false;
-    final previousRevision = KuaifeiOrigin.config.revision;
+    final previousRevision = KuaifyOrigin.config.revision;
     try {
-      final saved = await KuaifeiOrigin.replace(_prefs, config);
+      final saved = await KuaifyOrigin.replace(_prefs, config);
       if (saved) {
         loggy.info('Auth: applied origin DNS revision ${config.revision} from ${config.source}');
       }
@@ -258,7 +273,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     _originRefreshTimer?.cancel();
     _profileRefreshTimer?.cancel();
 
-    final originInterval = KuaifeiOrigin.config.bootstrapRefreshInterval;
+    final originInterval = KuaifyOrigin.config.bootstrapRefreshInterval;
     _originRefreshTimer = Timer.periodic(originInterval, (_) => unawaited(_refreshBootstrapConfig()));
     _profileRefreshTimer = Timer.periodic(_profileRefreshInterval, (_) => unawaited(_refreshSubscriptionProfiles()));
   }
@@ -269,7 +284,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     try {
       final changed = await OriginDnsBootstrap.refresh(_prefs, timeout: const Duration(seconds: 4));
       if (changed) {
-        loggy.info('Auth: refreshed signed bootstrap revision ${KuaifeiOrigin.config.revision}');
+        loggy.info('Auth: refreshed signed bootstrap revision ${KuaifyOrigin.config.revision}');
         _scheduleRefreshes();
       }
     } catch (error, stackTrace) {
@@ -370,9 +385,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     // has its own URL/name and ProfileRepository serializes database writes, so
     // concurrent downloads allow available packages to appear immediately.
     final outcomes = await Future.wait(
-      profiles.where((profile) => profile.subscribeUrl.isNotEmpty).map(
-        (profile) => _syncSubscriptionProfile(repo, profile),
-      ),
+      profiles
+          .where((profile) => profile.subscribeUrl.isNotEmpty)
+          .map((profile) => _syncSubscriptionProfile(repo, profile)),
     );
 
     var successCount = 0;
@@ -433,6 +448,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       return (profile: profile, success: false, failure: error);
     }
   }
+
   Future<void> _normalizeSyncedProfileNames(
     Db db,
     List<XboardSubscriptionProfile> profiles,

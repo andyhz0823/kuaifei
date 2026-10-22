@@ -4,24 +4,29 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
-import 'package:hiddify/core/http_client/kuaifei_origin.dart';
+import 'package:hiddify/core/http_client/kuaify_origin.dart';
 import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/features/auth/data/login_doh_resolver.dart';
 import 'package:hiddify/utils/custom_loggers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class XboardApiClient with InfraLogger {
-  static const subscriptionFlag = 'hiddify';
-  static const defaultUserAgent = 'hiddify/4.1.0';
+  // 订阅拉取用的协议 flag。Xboard 的「外部订阅节点」只在 General 协议（base64
+  // URI 列表）下合并进订阅内容（ClientController::appendExternalSubscriptions-
+  // ToGeneralSubscription 对非 General 协议直接 return）。若用 hiddify/sing-box
+  // 会走 SingBox 协议返回 JSON，只含本地自有节点、丢失全部外部订阅节点。
+  // 故这里用 v2rayn（General 协议），拿到完整节点列表。
+  static const subscriptionFlag = 'v2rayn';
+  static const defaultUserAgent = 'v2rayn/4.1.0';
   static const requestTimeout = Duration(seconds: 8);
   static const mappedConnectTimeout = Duration(seconds: 3);
   static const prewarmTimeout = Duration(seconds: 2);
   static const preferredEndpointTimeout = Duration(seconds: 3);
   static const _directTransportId = 'panel-direct';
-  static const _fixedRelayTransportId = 'relay-xz';
+  static const _backupPanelTransportId = 'backup-panel';
 
   final Dio _dio;
-  final Dio _relayDio;
+  final Dio _backupDio;
   final Uri _baseUri;
   final LoginDohResolver _resolver;
   final SharedPreferences? _preferences;
@@ -42,9 +47,12 @@ class XboardApiClient with InfraLogger {
           headers: {'User-Agent': userAgent, 'Accept': 'application/json'},
         ),
       ),
-      _relayDio = Dio(
+      _backupDio = Dio(
         BaseOptions(
-          baseUrl: Constants.distributionBaseUrl,
+          // 备用登录入口：同一面板的伪装域名（不同 CF 边缘），
+          // 主域名整域被墙时仍有一条独立通路。历史上前这里是 xz.kuaity.top（216），
+          // 登录竞速时会把请求送到 kuaifei 面板，已废弃。
+          baseUrl: Constants.backupPanelBaseUrl,
           connectTimeout: requestTimeout,
           sendTimeout: requestTimeout,
           receiveTimeout: requestTimeout,
@@ -57,19 +65,19 @@ class XboardApiClient with InfraLogger {
         ),
       ) {
     _configureAdapter(_dio);
-    _configureAdapter(_relayDio);
+    _configureAdapter(_backupDio);
     _transportDios[_directTransportId] = _dio;
     _transportUrls[_directTransportId] = _baseUri.toString();
-    _transportDios[_fixedRelayTransportId] = _relayDio;
-    _transportUrls[_fixedRelayTransportId] = Constants.distributionBaseUrl;
+    _transportDios[_backupPanelTransportId] = _backupDio;
+    _transportUrls[_backupPanelTransportId] = Constants.backupPanelBaseUrl;
     _configureDynamicEndpoints(userAgent);
     _restorePreferredEndpoint();
   }
 
   void _configureDynamicEndpoints(String userAgent) {
-    final endpoints = <ClientAuthEndpoint>[...KuaifeiOrigin.config.authEndpoints];
+    final endpoints = <ClientAuthEndpoint>[...KuaifyOrigin.config.authEndpoints];
     if (endpoints.isEmpty) {
-      final cached = _preferences?.getString(KuaifeiOrigin.endpointPoolPreferenceKey);
+      final cached = _preferences?.getString(KuaifyOrigin.endpointPoolPreferenceKey);
       if (cached != null && cached.isNotEmpty) {
         try {
           final decoded = jsonDecode(cached);
@@ -110,7 +118,7 @@ class XboardApiClient with InfraLogger {
   }
 
   void _restorePreferredEndpoint() {
-    final cached = _preferences?.getString(KuaifeiOrigin.lastKnownGoodEndpointPreferenceKey);
+    final cached = _preferences?.getString(KuaifyOrigin.lastKnownGoodEndpointPreferenceKey);
     if (cached == null || cached.isEmpty) return;
     try {
       final decoded = jsonDecode(cached);
@@ -133,7 +141,7 @@ class XboardApiClient with InfraLogger {
     if (endpointUrl == null || _preferences == null) return;
     unawaited(
       _preferences.setString(
-        KuaifeiOrigin.lastKnownGoodEndpointPreferenceKey,
+        KuaifyOrigin.lastKnownGoodEndpointPreferenceKey,
         jsonEncode({'id': transport, 'url': endpointUrl, 'saved_at': DateTime.now().millisecondsSinceEpoch}),
       ),
     );
@@ -142,7 +150,7 @@ class XboardApiClient with InfraLogger {
   void _configureAdapter(Dio dio) {
     dio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
-        final client = HttpClient(context: KuaifeiOrigin.securityContext)
+        final client = HttpClient(context: KuaifyOrigin.securityContext)
           ..connectionTimeout = requestTimeout
           ..findProxy = (uri) => 'DIRECT';
         client.connectionFactory = (uri, proxyHost, proxyPort) async {
@@ -156,7 +164,7 @@ class XboardApiClient with InfraLogger {
   String? _preferredTransport;
 
   Future<void> prewarm() async {
-    final cached = KuaifeiOrigin.addressesForHost(_baseUri.host);
+    final cached = KuaifyOrigin.addressesForHost(_baseUri.host);
     if (cached.isNotEmpty) {
       loggy.debug('Auth: loaded cached origin routing for ${_baseUri.host}: ${cached.join(', ')}');
       return;
@@ -180,7 +188,7 @@ class XboardApiClient with InfraLogger {
   }
 
   Future<Socket> _connectForUri(Uri uri) async {
-    final cached = KuaifeiOrigin.connectionAddressesForHost(uri.host).map(InternetAddress.new).toList(growable: false);
+    final cached = KuaifyOrigin.connectionAddressesForHost(uri.host).map(InternetAddress.new).toList(growable: false);
     Object? lastError;
     if (cached.isNotEmpty) {
       try {
@@ -230,7 +238,7 @@ class XboardApiClient with InfraLogger {
 
   Future<Socket> _secureIfNeeded(Uri uri, Socket socket) {
     if (!uri.isScheme('https')) return Future.value(socket);
-    return SecureSocket.secure(socket, host: uri.host, context: KuaifeiOrigin.securityContext);
+    return SecureSocket.secure(socket, host: uri.host, context: KuaifyOrigin.securityContext);
   }
 
   void setToken(String token) {
@@ -375,7 +383,7 @@ class XboardApiClient with InfraLogger {
     final withScheme = normalized.contains('://') ? normalized : 'https://$normalized';
     final uri = Uri.tryParse(withScheme);
     if (uri == null) return withScheme;
-    final canonicalHost = KuaifeiOrigin.normalizeHost(uri.host);
+    final canonicalHost = KuaifyOrigin.normalizeHost(uri.host);
     if (canonicalHost == null || canonicalHost == uri.host) return withScheme;
     return uri.replace(host: canonicalHost).toString();
   }

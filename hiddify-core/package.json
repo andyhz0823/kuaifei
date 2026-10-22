@@ -1,0 +1,8 @@
+{
+  "name": "hiddify-core-build",
+  "version": "0.0.0",
+  "private": true,
+  "description": "占位文件：hiddify-core 的 Makefile 里 lib_install 目标会执行 npm install，而上游仓库并未附带 package.json，导致从源码编译 Android core 时 make 以 Error 254 中止。实际构建只用 Go/gomobile，无需任何 npm 依赖。",
+  "dependencies": {},
+  "devDependencies": {}
+}

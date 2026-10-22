@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:hiddify/core/http_client/edge_probe.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ClientAuthEndpoint {
@@ -127,9 +128,12 @@ class OriginDnsConfig {
     final rawRecords = json['records'];
     if (rawRecords is Map) {
       for (final entry in rawRecords.entries) {
-        final host = KuaifeiOrigin.normalizePattern(entry.key.toString());
-        final addresses = KuaifeiOrigin.normalizeAddresses(entry.value);
-        if (host != null && addresses.isNotEmpty) records[host] = addresses;
+        final host = KuaifyOrigin.normalizePattern(entry.key.toString());
+        final addresses = KuaifyOrigin.normalizeAddresses(entry.value);
+        // 别的品牌的 origin 记录（kuaifei.top / kuaity.top / kuaifei.cc.cd …）一律不收，
+        // 否则客户端可能拿它去拨号，把请求送到 216 / 192。
+        if (host == null || addresses.isEmpty || KuaifyOrigin.isForeignBrandHost(host)) continue;
+        records[host] = addresses;
       }
     }
 
@@ -156,7 +160,12 @@ class OriginDnsConfig {
     if (rawAuthEndpoints is Iterable) {
       for (final endpoint in rawAuthEndpoints) {
         final parsed = ClientAuthEndpoint.fromJson(endpoint);
-        if (parsed.isUsable) authEndpoints.add(parsed);
+        if (!parsed.isUsable) continue;
+        // 只接受本品牌域名的端点。跨品牌端点（216 下发的 kuaify.top / kuaifj.top /
+        // kuaifei.cc.cd / xz.kuaity.top）会把登录和订阅带到错误的面板。
+        final host = Uri.tryParse(parsed.url)?.host ?? '';
+        if (!KuaifyOrigin.isBrandHost(host)) continue;
+        authEndpoints.add(parsed);
       }
     }
     authEndpoints.sort((left, right) => left.priority.compareTo(right.priority));
@@ -167,7 +176,7 @@ class OriginDnsConfig {
     }
 
     return OriginDnsConfig(
-      source: KuaifeiOrigin.normalizeHost(json['source']?.toString() ?? '') ?? '',
+      source: KuaifyOrigin.normalizeHost(json['source']?.toString() ?? '') ?? '',
       revision: revision,
       refreshInterval: Duration(seconds: refreshSeconds.clamp(300, 86400)),
       bootstrapRefreshInterval: Duration(seconds: bootstrapRefreshSeconds.clamp(900, 86400)),
@@ -194,8 +203,8 @@ class OriginDnsConfig {
   };
 }
 
-class KuaifeiOrigin {
-  const KuaifeiOrigin._();
+class KuaifyOrigin {
+  const KuaifyOrigin._();
 
   static const _cloudflareOriginCaRsa = '''
 -----BEGIN CERTIFICATE-----
@@ -232,10 +241,49 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
     return context;
   }
 
-  static const preferenceKey = 'origin_dns_last_known_good_v1';
-  static const endpointPoolPreferenceKey = 'auth_endpoint_pool_v1';
-  static const lastKnownGoodEndpointPreferenceKey = 'auth_last_known_good_endpoint_v1';
+  static const preferenceKey = 'origin_dns_last_known_good_v2';
+  static const endpointPoolPreferenceKey = 'auth_endpoint_pool_v2';
+  static const lastKnownGoodEndpointPreferenceKey = 'auth_last_known_good_endpoint_v2';
   static OriginDnsConfig _config = const OriginDnsConfig.empty();
+
+  /// 自动优选出来的 CF 边缘 IP：host -> 按当前网络耗时排序的地址列表。
+  /// 命中时优先于写死的 [builtinFallbackRecords]。
+  static Map<String, List<String>> _probedEdges = const {};
+
+  /// 属于本品牌的域名后缀。服务端下发的端点只要不在此列一律丢弃。
+  ///
+  /// 这条白名单是「登录被带到别的品牌面板」的最终兜底：216（kuaifei 线）会把
+  /// kuaify.top / kuaifj.top / kuaifei.cc.cd / xz.kuaity.top 当成自己的端点下发，
+  /// 只按优先级排序的话客户端就会挑到 216。
+  static const List<String> brandDomainSuffixes = ['kuaify.cc.cd', 'tkyayun.cc.cd', 'tkya.us.ci'];
+
+  /// 其它品牌的域名（216 / 192 的站点与分发域），出现在 origin 记录里直接丢弃。
+  static const List<String> foreignBrandDomainSuffixes = [
+    'kuaifei.top',
+    'kuaity.top',
+    'kuaifei.cc.cd',
+    'tkya.cc.cd',
+    'kuaify.top',
+    'kuaifj.top',
+  ];
+
+  static bool isBrandHost(String host) {
+    final value = host.trim().toLowerCase();
+    if (value.isEmpty) return false;
+    for (final suffix in brandDomainSuffixes) {
+      if (value == suffix || value.endsWith('.$suffix')) return true;
+    }
+    return false;
+  }
+
+  static bool isForeignBrandHost(String host) {
+    final value = host.trim().toLowerCase();
+    if (value.isEmpty) return false;
+    for (final suffix in foreignBrandDomainSuffixes) {
+      if (value == suffix || value.endsWith('.$suffix')) return true;
+    }
+    return false;
+  }
 
   static const Map<String, List<String>> githubBootstrapRecords = {
     'github.com': ['20.29.134.23'],
@@ -253,9 +301,21 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
 
   // The primary panel domain must remain reachable even if DNS, Cloudflare,
   // or a cached origin-dns record is unavailable. Keep the original URI host for
-  // TLS SNI and HTTP Host while dialing this fixed production origin address.
+  // TLS SNI and HTTP Host while dialing these fixed Cloudflare edge addresses.
   static const Map<String, List<String>> builtinFallbackRecords = {
-    'kuaifei.top': ['34.92.219.162'],
+    'www.kuaify.cc.cd': ['104.21.84.66', '172.67.187.171'],
+    'kuaify.cc.cd': ['104.21.84.66', '172.67.187.171'],
+    // 订阅链接走服务端随机子域 `https://[rand9].tkyayun.cc.cd/vip/<token>`，
+    // 这一条之前没有任何托底记录：DNS 被污染时整条订阅链路直接失败
+    // （表现为「订阅下载失败」，只能等系统 DNS 恢复）。
+    // 下面是 tkyayun.cc.cd 这个 zone 的 Cloudflare 边缘 IP（2026-10-22 DoH 实测：
+    // `dig +short tkyayun.cc.cd @1.1.1.1` → 172.67.179.226 / 104.21.35.212）。
+    // 通配符条目由 _match() 匹配任意 `<label>.tkyayun.cc.cd`。
+    'tkyayun.cc.cd': ['172.67.179.226', '104.21.35.212'],
+    '*.tkyayun.cc.cd': ['172.67.179.226', '104.21.35.212'],
+    // 备用登录入口（同一面板的伪装域名），CF 边缘与面板主域名不同，
+    // 主域名整域被墙时仍有一条独立通路。
+    'by.tkya.us.ci': ['172.67.147.95', '104.21.41.132'],
   };
 
   static const List<String> protectedPanelBaseDomains = [];
@@ -264,6 +324,8 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   static OriginDnsConfig get config => _config;
 
   static void restore(SharedPreferences preferences) {
+    // 先恢复自动优选的边缘 IP：它比写死的两个更贴合当前网络。
+    _probedEdges = EdgeProbe.readCache(preferences);
     final raw = preferences.getString(preferenceKey);
     if (raw == null || raw.isEmpty) return;
     try {
@@ -273,6 +335,34 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
       // A malformed cache is ignored and replaced after the next successful sync.
     }
   }
+
+  /// 对每个备用入口探测一批 CF 边缘 IP，挑当前网络**真正可用**（HTTP 200）且最快的
+  /// 几个缓存起来（6 小时有效）。
+  ///
+  /// 按 host 分别探测：`www.kuaify.cc.cd` 与 `by.tkya.us.ci` 解析到不同边缘，
+  /// 一个域名整域被墙时另一个仍可能通。
+  static Future<void> refreshEdgeCache(SharedPreferences preferences, {required List<Uri> probeUris}) async {
+    if (probeUris.isEmpty) return;
+    try {
+      final results = <String, List<String>>{};
+      for (final probeUri in probeUris) {
+        final best = await EdgeProbe.probe(probeUri);
+        if (best.isNotEmpty) results[probeUri.host] = best;
+      }
+      if (results.isEmpty) return;
+      _probedEdges = Map<String, List<String>>.unmodifiable(results);
+      await EdgeProbe.writeCache(preferences, _probedEdges);
+    } catch (_) {
+      // 探测失败就继续用写死的兜底地址。
+    }
+  }
+
+  /// 优选结果被边缘拒绝（403/521 等）时清掉，立刻回到写死的兜底地址。
+  static void clearEdgeCache() {
+    _probedEdges = const {};
+  }
+
+  static bool get hasProbedEdgeAddresses => _probedEdges.isNotEmpty;
 
   static Future<bool> replace(SharedPreferences preferences, OriginDnsConfig next, {bool onlyIfNewer = false}) async {
     if (!next.isUsable) return false;
@@ -284,9 +374,13 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
 
     final encoded = jsonEncode(next.toJson());
     if (!await preferences.setString(preferenceKey, encoded)) return false;
+    // 落盘前再过滤一次：只保留本品牌域名的端点，杜绝跨品牌端点被缓存复用。
+    final brandEndpoints = next.authEndpoints
+        .where((endpoint) => isBrandHost(Uri.tryParse(endpoint.url)?.host ?? ''))
+        .toList(growable: false);
     await preferences.setString(
       endpointPoolPreferenceKey,
-      jsonEncode(next.authEndpoints.map((endpoint) => endpoint.toJson()).toList(growable: false)),
+      jsonEncode(brandEndpoints.map((endpoint) => endpoint.toJson()).toList(growable: false)),
     );
     _config = next;
     return true;
@@ -306,8 +400,15 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   }
 
   static List<String> addressesForHost(String host) {
+    final normalizedHost = normalizeHost(host);
+    // 自动优选结果优先（按 host 分别缓存）：写死的边缘 IP 在某些网络下会被墙/绕路，
+    // 探测出来的这组是当前网络实测 200 且最快的。
+    if (normalizedHost != null) {
+      final probed = _probedEdges[normalizedHost];
+      if (probed != null && probed.isNotEmpty) return probed;
+    }
     // The fixed primary-origin route intentionally wins over remotely supplied
-    // records, preventing a stale cache from routing kuaifei.top back to an
+    // records, preventing a stale cache from routing the panel back to an
     // unreachable Cloudflare edge.
     final builtin = _match(builtinFallbackRecords, host);
     if (builtin.isNotEmpty) return builtin;

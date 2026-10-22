@@ -47,6 +47,22 @@ def http_get(url: str) -> bytes:
         return resp.read()
 
 
+def http_get_asset(url: str) -> bytes:
+    """下载 release 资产内容（走 API 的 assets/{id} 端点）。
+
+    browser_download_url 依赖 GitHub 的 release 下载 CDN，CDN 偶发故障时
+    会直接 404（而 API 端点仍可下载）。这里固定用 API + octet-stream，
+    避免 CDN 故障阻塞清单生成。
+    """
+    headers = {"User-Agent": "kuaifei-update-channel", "Accept": "application/octet-stream"}
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return resp.read()
+
+
 def fetch_release(repo: str, tag: str) -> dict:
     return json.loads(http_get(f"{API}/repos/{repo}/releases/tags/{tag}"))
 
@@ -65,7 +81,7 @@ def fetch_sha256sums(assets: list[dict]) -> dict[str, dict]:
     entry = next((a for a in assets if a["name"] == "SHA256SUMS.txt"), None)
     if entry is None:
         raise SystemExit("Release 中找不到 SHA256SUMS.txt，无法生成 files 校验块")
-    text = http_get(entry["browser_download_url"]).decode("utf-8")
+    text = http_get_asset(entry["url"]).decode("utf-8")
     out: dict[str, dict] = {}
     for line in text.splitlines():
         parts = line.strip().split(None, 1)
@@ -211,7 +227,7 @@ def main() -> int:
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">\n'
         "  <channel>\n"
-        "    <title>Kuaifei Release</title>\n"
+        "    <title>Kuaify Release</title>\n"
         f"{items}"
         "  </channel>\n"
         "</rss>\n"

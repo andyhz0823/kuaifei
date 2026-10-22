@@ -100,6 +100,22 @@ func TestSplitRuleOutboundTargets(t *testing.T) {
 	}
 }
 
+func TestSplitRuleOutboundTargetPriority(t *testing.T) {
+	// outbound_target 优先于 outbound 枚举：直接作为节点/策略组名。
+	rule := &SplitRule{
+		Domains:        "domain:example.com",
+		Outbound:       "proxy",
+		OutboundTarget: "HK-Tokyo-01",
+	}
+	got, ok := rule.MakeRouteRule()
+	if !ok {
+		t.Fatal("expected rule to be valid")
+	}
+	if got.RouteOptions.Outbound != "HK-Tokyo-01" {
+		t.Fatalf("expected outbound target %q, got %q", "HK-Tokyo-01", got.RouteOptions.Outbound)
+	}
+}
+
 func TestSplitRuleWithoutMatcherIsIgnored(t *testing.T) {
 	rule := &SplitRule{Outbound: "proxy"}
 	if _, ok := rule.MakeRouteRule(); ok {
