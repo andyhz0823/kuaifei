@@ -72,7 +72,7 @@ jobs:
       matrix:
         include:
           # 注意：windows/CMakeLists.txt 安装的是 hiddify-core/bin/HiddifyCli.exe，
-          # 而本分支 hiddify-core/Makefile 的 CLINAME 是 KuaifeiCli，
+          # 而本分支 hiddify-core/Makefile 的 CLINAME 是 KuaifyCli，
           # 所以打包前统一改名，CMake 侧无需改动。
           - target: windows-amd64
             artifact: hiddify-lib-windows-amd64
@@ -144,7 +144,10 @@ jobs:
           set -euo pipefail
           ls -la
           # windows/CMakeLists.txt 只认 HiddifyCli.exe（安装时再改名成 KuaifyCli.exe）
-          if [ -f KuaifeiCli.exe ]; then
+          # core 侧 CLINAME 现为 KuaifyCli，旧名 KuaifeiCli 一并兼容
+          if [ -f KuaifyCli.exe ]; then
+            mv -f KuaifyCli.exe HiddifyCli.exe
+          elif [ -f KuaifeiCli.exe ]; then
             mv -f KuaifeiCli.exe HiddifyCli.exe
           fi
           ls -la

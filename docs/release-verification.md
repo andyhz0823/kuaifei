@@ -1,4 +1,4 @@
-# Kuaifei release verification
+# Kuaify release verification
 
 This repository publishes release artifacts with **Sigstore keyless signing** from GitHub Actions. No private Sigstore key is stored in the repository or in GitHub Secrets.
 
@@ -10,10 +10,10 @@ PowerShell example:
 
 ```powershell
 cosign verify-blob `
-  --bundle .\Kuaifei-v4.1.11-android-arm64-v8a.apk.sigstore.json `
+  --bundle .\Kuaify-v4.1.11-android-arm64-v8a.apk.sigstore.json `
   --certificate-identity "https://github.com/andyhz0823/kuaifei/.github/workflows/release.yml@refs/tags/v4.1.11" `
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" `
-  .\Kuaifei-v4.1.11-android-arm64-v8a.apk
+  .\Kuaify-v4.1.11-android-arm64-v8a.apk
 ```
 
 For another normal tag-triggered release, replace `v4.1.11` in both the filename and the certificate identity. Verify the corresponding `.exe`, `.zip`, `SHA256SUMS.txt`, and `SIGSTORE-VERIFICATION.txt` in the same way.

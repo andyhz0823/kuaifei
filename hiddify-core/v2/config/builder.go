@@ -601,7 +601,7 @@ func setRoutingOptions(options *option.Options, hopt *HiddifyOptions) error {
 	// 	// 	option.Rule{
 	// 	// 		Type: C.RuleTypeDefault,
 	// 	// 		DefaultOptions: option.DefaultRule{
-	// 	// 			ProcessName: []string{"kuaifei", "kuaifei.exe", "KuaifeiCli", "KuaifeiCli.exe"},
+	// 	// 			ProcessName: []string{"kuaify", "kuaify.exe", "KuaifyCli", "KuaifyCli.exe"},
 	// 	// 			Outbound:    OutboundBypassTag,
 	// 	// 		},
 	// 	// 	},

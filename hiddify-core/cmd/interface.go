@@ -23,7 +23,7 @@ var (
 )
 
 var mainCommand = &cobra.Command{
-	Use:              "KuaifeiCli",
+	Use:              "KuaifyCli",
 	PersistentPreRun: preRun,
 }
 

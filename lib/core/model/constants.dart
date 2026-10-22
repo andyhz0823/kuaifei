@@ -8,7 +8,7 @@ abstract class Constants {
   static const githubReleasesApiUrl = "https://api.github.com/repos/andyhz0823/Xboard/releases";
   static const githubLatestReleaseUrl = "https://github.com/andyhz0823/Xboard/releases/latest";
   // 面板地址已对用户隐藏，登录 / 拉取订阅 / 引导端点固定走 kuaify.cc.cd（107 面板）。
-  // 该域名由 Cloudflare 代理，客户端通过 KuaifeiOrigin 的边缘 IP 探测直连。
+  // 该域名由 Cloudflare 代理，客户端通过 KuaifyOrigin 的边缘 IP 探测直连。
   static const panelBaseUrl = "https://www.kuaify.cc.cd";
   static const panelBaseDomain = "kuaify.cc.cd";
 
@@ -19,6 +19,12 @@ abstract class Constants {
   // 于是登录与订阅都被带到 216，节点全是 kuaifei 那一套。
   static const bootstrapUrl = "$panelBaseUrl/api/v1/guest/client/bootstrap";
   static const originDnsUrl = "$panelBaseUrl/api/v1/guest/client/origin-dns";
+
+  // 备用登录入口：同一面板（107）的伪装域名，解析到**另一组** CF 边缘
+  // （172.67.147.95 / 104.21.41.132），用于 www.kuaify.cc.cd 整域被墙时保命。
+  // 实测：bootstrap 200，payload.source 仍是 www.kuaify.cc.cd，同一套账号数据。
+  static const backupPanelBaseUrl = "https://by.tkya.us.ci";
+  static const backupBootstrapUrl = "$backupPanelBaseUrl/api/v1/guest/client/bootstrap";
 
   // 安装包 / 更新清单的公共 CDN。只承载文件，**不参与面板身份判定**。
   static const distributionBaseUrl = "https://xz.kuaity.top";
