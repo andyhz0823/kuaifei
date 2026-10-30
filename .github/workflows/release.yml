@@ -145,6 +145,7 @@ jobs:
       - name: Fetch custom core
         uses: actions/cache/restore@v4
         with:
+          enableCrossOsArchive: true
           path: core-dist/hiddify-lib-android.tar.gz
           key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-hiddify-lib-android
       - name: Install custom Android core
@@ -203,6 +204,7 @@ jobs:
       - name: Fetch custom core
         uses: actions/cache/restore@v4
         with:
+          enableCrossOsArchive: true
           path: core-dist/hiddify-lib-windows-amd64.tar.gz
           key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-hiddify-lib-windows-amd64
       - name: Install custom Windows core
