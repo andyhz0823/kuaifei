@@ -143,10 +143,10 @@ jobs:
           keyPassword=$ANDROID_KEY_PASSWORD
           EOF
       - name: Fetch custom core
-        uses: actions/download-artifact@v4
+        uses: actions/cache/restore@v4
         with:
-          name: hiddify-lib-android
-          path: core-dist
+          path: core-dist/hiddify-lib-android.tar.gz
+          key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-hiddify-lib-android
       - name: Install custom Android core
         shell: bash
         run: |
@@ -181,12 +181,10 @@ jobs:
               'Configure the stable Android keystore secrets before publishing an update over an existing installation.' \
               > out/ANDROID-PLATFORM-SIGNING-WARNING.txt
           fi
-      - uses: actions/upload-artifact@v6
+      - uses: actions/cache/save@v4
         with:
-          name: tkya-android
           path: out/
-          if-no-files-found: error
-          retention-days: 14
+          key: release-android-${{ github.run_id }}-${{ github.run_attempt }}
 
   build-windows:
     needs: [preflight, build-core]
@@ -202,10 +200,10 @@ jobs:
         shell: pwsh
         run: choco install innosetup --no-progress --yes
       - name: Fetch custom core
-        uses: actions/download-artifact@v4
+        uses: actions/cache/restore@v4
         with:
-          name: hiddify-lib-windows-amd64
-          path: core-dist
+          path: core-dist/hiddify-lib-windows-amd64.tar.gz
+          key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-hiddify-lib-windows-amd64
       - name: Install custom Windows core
         shell: pwsh
         run: |
@@ -246,23 +244,24 @@ jobs:
           WARNING: Windows artifacts are not Authenticode-signed in this open-source workflow.
           Sigstore keyless signatures verify the release artifact and GitHub Actions identity, but do not make Windows Smart App Control trust the binary.
           '@
-      - uses: actions/upload-artifact@v6
+      - uses: actions/cache/save@v4
         with:
-          name: tkya-windows
           path: out/
-          if-no-files-found: error
-          retention-days: 14
+          key: release-windows-${{ github.run_id }}-${{ github.run_attempt }}
 
   publish:
     needs: [preflight, build-android, build-windows]
     if: needs.preflight.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/cache/restore@v4
         with:
-          pattern: tkya-*
-          merge-multiple: true
           path: out/
+          key: release-android-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/cache/restore@v4
+        with:
+          path: out/
+          key: release-windows-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Install Cosign for Sigstore keyless signing
         uses: sigstore/cosign-installer@v3
       - name: Generate verification metadata and SHA-256 checksums

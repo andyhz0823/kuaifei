@@ -148,11 +148,10 @@ jobs:
           echo "packing: $files"
           tar -czvf "../${{ matrix.artifact }}.tar.gz" $files
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/cache/save@v4
         with:
-          name: ${{ matrix.artifact }}
           path: hiddify-core/${{ matrix.artifact }}.tar.gz
-          if-no-files-found: error
+          key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.artifact }}
 
   fetch-core:
     name: Fetch cached core / ${{ matrix.target }}
@@ -181,12 +180,11 @@ jobs:
             --pattern "${ARTIFACT}.tar.gz" \
             --dir core-dist
           ls -la core-dist
-      # 重新上传为本次 run 的 artifact，下游 download-artifact 无需改动
-      - uses: actions/upload-artifact@v4
+      # Use Actions Cache for in-run transfer; Release artifacts remain the long-term core cache.
+      - uses: actions/cache/save@v4
         with:
-          name: ${{ matrix.artifact }}
           path: core-dist/${{ matrix.artifact }}.tar.gz
-          if-no-files-found: error
+          key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.artifact }}
 
   publish-cache:
     name: Publish core cache
@@ -195,14 +193,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/cache/restore@v4
         with:
-          pattern: hiddify-lib-*
-          # 用 pattern 下载多个 artifact 时，默认会各自建一层子目录
-          # （cache-dist/<artifact>/xxx.tar.gz），下面的通配就匹配不到；
-          # merge-multiple 让它们平铺到 cache-dist/ 下。
-          merge-multiple: true
-          path: cache-dist
+          path: hiddify-core/hiddify-lib-windows-amd64.tar.gz
+          key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-hiddify-lib-windows-amd64
+      - uses: actions/cache/restore@v4
+        with:
+          path: hiddify-core/hiddify-lib-android.tar.gz
+          key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-hiddify-lib-android
       - name: Publish cache release
         shell: bash
         env:
@@ -211,13 +209,13 @@ jobs:
           CORE_SHA: ${{ needs.resolve.outputs.sha }}
         run: |
           set -euo pipefail
-          ls -la cache-dist
+          ls -la hiddify-core/*.tar.gz
           notes="hiddify-core 编译缓存（内容寻址，core 子树 SHA: ${CORE_SHA}）。仅供 CI 复用，不是客户端发布包。"
           if gh release view "$CACHE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$CACHE_TAG" cache-dist/*.tar.gz \
+            gh release upload "$CACHE_TAG" hiddify-core/*.tar.gz \
               --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$CACHE_TAG" cache-dist/*.tar.gz \
+            gh release create "$CACHE_TAG" hiddify-core/*.tar.gz \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "core cache ${CORE_SHA:0:12}" \
