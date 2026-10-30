@@ -91,7 +91,11 @@ class OriginDnsBootstrap {
   }
 
   static String? _panelHost(SharedPreferences preferences) {
-    final candidates = [preferences.getString('auth_last_panel_url'), preferences.getString('auth_panel_url')];
+    final candidates = [
+      Constants.fixedPanelUrl,
+      preferences.getString('auth_last_panel_url'),
+      preferences.getString('auth_panel_url'),
+    ];
     for (final value in candidates) {
       if (value == null || value.trim().isEmpty) continue;
       final uri = Uri.tryParse(value.contains('://') ? value : 'https://$value');

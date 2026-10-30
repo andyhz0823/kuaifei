@@ -3,6 +3,15 @@ import 'package:hiddify/core/http_client/tkya_origin.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  test('keeps the measured Cloudflare edge fallback order unchanged', () {
+    expect(TkyaOrigin.cloudflareEdgeFallbackAddresses, [
+      '104.21.50.151',
+      '104.21.34.178',
+      '172.67.163.238',
+      '172.67.163.144',
+    ]);
+  });
+
   test('initializes Cloudflare Origin CA security context', () {
     expect(() => TkyaOrigin.securityContext, returnsNormally);
   });
@@ -10,8 +19,8 @@ void main() {
   test('pins the apex, www and every subdomain to the Cloudflare edge', () {
     // Panel hosts are dialled at the Cloudflare edge; the URI host is kept for
     // TLS SNI and the HTTP Host header so Cloudflare routes back to the origin.
-    // The apex is pinned explicitly: a wildcard never matches the apex host, and
-    // the apex is exactly what a user types into the panel address field.
+    // The apex is pinned explicitly: a wildcard never matches the apex host.
+    // The dedicated client always uses the fixed www panel endpoint.
     expect(TkyaOrigin.addressesForHost('tkya.cc.cd'), TkyaOrigin.cloudflareEdgeFallbackAddresses);
     expect(TkyaOrigin.addressesForHost('www.tkya.cc.cd'), TkyaOrigin.cloudflareEdgeFallbackAddresses);
     expect(TkyaOrigin.addressesForHost('panel.tkya.cc.cd'), TkyaOrigin.cloudflareEdgeFallbackAddresses);

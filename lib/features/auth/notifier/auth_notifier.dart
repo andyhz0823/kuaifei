@@ -35,7 +35,7 @@ final authNotifierProvider = AsyncNotifierProvider<AuthNotifier, AuthStatus>(() 
 
 class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   static const _loginTimeout = Duration(seconds: 25);
-  static const _loginTimeoutMessage = '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.tkya.cc.cd';
+  static const _loginTimeoutMessage = '登录超时，请检查账号密码或网络后重试';
   // ignore: unused_field
   static const _defaultPurchaseUrl = Constants.purchaseUrl;
   static const _legacyPurchaseUrl = 'https://tkya.cc.cd';
@@ -81,7 +81,7 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
 
   SharedPreferences get _prefs => ref.read(sharedPreferencesProvider).requireValue;
 
-  String? _readPanelUrl() => _prefs.getString('auth_panel_url');
+  String? _readPanelUrl() => Constants.fixedPanelUrl;
   String? _readSanctumToken() => _prefs.getString('auth_sanctum_token');
   String? _readSubscriptionToken() => _prefs.getString('auth_subscription_token');
   String? _readSubscribeUrl() => _prefs.getString('auth_subscribe_url');
@@ -126,11 +126,11 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     await _prefs.remove(key);
   }
 
-  Future<void> login({required String panelUrl, required String email, required String password}) async {
+  Future<void> login({required String email, required String password}) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
-      final normalizedUrl = XboardApiClient.normalizeHttpUrl(panelUrl).replaceAll(RegExp(r'/+$'), '');
-      await _rememberLastLoginInput(panelUrl: normalizedUrl, email: email, password: password);
+      const normalizedUrl = Constants.fixedPanelUrl;
+      await _rememberLastLoginInput(email: email, password: password);
 
       // Bootstrap refresh must never sit on the login critical path. The
       // currently cached signed config is already available to XboardApiClient.
@@ -184,11 +184,10 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   }
 
   Future<void> _rememberLastLoginInput({
-    required String panelUrl,
     required String email,
     required String password,
   }) async {
-    await _writePreference('auth_last_panel_url', panelUrl);
+    await _writePreference('auth_last_panel_url', Constants.fixedPanelUrl);
     await _writePreference('auth_last_email', email);
     await _writePreference('auth_last_password', password);
   }

@@ -11,7 +11,6 @@ class LoginPage extends ConsumerStatefulWidget {
 
 class _LoginPageState extends ConsumerState<LoginPage> {
   final _formKey = GlobalKey<FormState>();
-  final _panelUrlController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
@@ -20,14 +19,12 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   void initState() {
     super.initState();
     final auth = ref.read(authNotifierProvider.notifier);
-    _panelUrlController.text = auth.lastPanelUrl ?? '';
     _emailController.text = auth.lastEmail ?? '';
     _passwordController.text = auth.lastPassword ?? '';
   }
 
   @override
   void dispose() {
-    _panelUrlController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -39,7 +36,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     await ref
         .read(authNotifierProvider.notifier)
         .login(
-          panelUrl: _panelUrlController.text.trim(),
           email: _emailController.text.trim(),
           password: _passwordController.text,
         );
@@ -76,29 +72,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 32),
-                  TextFormField(
-                    controller: _panelUrlController,
-                    keyboardType: TextInputType.url,
-                    decoration: const InputDecoration(
-                      labelText: '面板地址',
-                      hintText: 'https://tttt.tkya.cc.cd',
-                      helperText: '如果登录不上，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.tkya.cc.cd',
-                      helperMaxLines: 2,
-                      prefixIcon: Icon(Icons.dns_outlined),
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return '请输入面板地址';
-                      }
-                      final url = value.trim();
-                      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                        return '面板地址需要以 http:// 或 https:// 开头';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
@@ -187,25 +160,17 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   String _formatError(String error) {
     // Clean up common verbose error messages
-    if (error.contains('SocketException')) {
-      final hostMatch = RegExp(r"Unable to connect to ([^\s:]+)").firstMatch(error);
-      if (hostMatch != null) {
-        final host = hostMatch.group(1);
-        return '无法连接到 $host，请检查面板地址是否正确，或更换域名重试。';
-      }
-      return '网络连接失败，请检查面板地址或网络设置。';
+    if (error.contains('SocketException') || error.contains('DioException')) {
+      return '网络连接失败，请检查网络后重试。';
     }
-    if (error.contains('登录失败，请修改面板域名前缀')) {
-      return '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.tkya.cc.cd';
-    }
-    if (error.contains('DioException')) {
-      return '登录失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.tkya.cc.cd';
+    if (error.contains('登录超时')) {
+      return '登录超时，请检查账号密码或网络后重试。';
     }
     if (error.contains('DoH failed')) {
-      return 'DNS解析失败，请修改面板域名前缀为任意5位以上字母加数字组合，例如：https://kk44v.tkya.cc.cd';
+      return 'DNS解析失败，请检查网络后重试。';
     }
     if (error.contains('XMLHttpRequest')) {
-      return '网络请求被拦截，请检查网络环境或更换面板地址。';
+      return '网络请求被拦截，请检查网络环境后重试。';
     }
     // Truncate very long errors
     if (error.length > 200) {
