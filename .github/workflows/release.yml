@@ -314,7 +314,12 @@ jobs:
               --certificate-oidc-issuer "$SIGSTORE_OIDC_ISSUER" \
               "$file"
           done
+      # Artifact attestations are only available for public repositories on
+      # github.com; the attest API returns 404 for private repos and would
+      # abort the publish job. Sigstore keyless signatures above still cover
+      # every artifact, so the release stays verifiable either way.
       - name: Attest release build provenance
+        if: github.event.repository.private == false
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
