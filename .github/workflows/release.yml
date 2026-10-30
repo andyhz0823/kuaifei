@@ -183,6 +183,7 @@ jobs:
           fi
       - uses: actions/cache/save@v4
         with:
+          enableCrossOsArchive: true
           path: out/
           key: release-android-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -246,6 +247,7 @@ jobs:
           '@
       - uses: actions/cache/save@v4
         with:
+          enableCrossOsArchive: true
           path: out/
           key: release-windows-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -256,10 +258,12 @@ jobs:
     steps:
       - uses: actions/cache/restore@v4
         with:
+          enableCrossOsArchive: true
           path: out/
           key: release-android-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/cache/restore@v4
         with:
+          enableCrossOsArchive: true
           path: out/
           key: release-windows-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Install Cosign for Sigstore keyless signing

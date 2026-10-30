@@ -150,6 +150,7 @@ jobs:
 
       - uses: actions/cache/save@v4
         with:
+          enableCrossOsArchive: true
           path: hiddify-core/${{ matrix.artifact }}.tar.gz
           key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.artifact }}
 
@@ -183,6 +184,7 @@ jobs:
       # Use Actions Cache for in-run transfer; Release artifacts remain the long-term core cache.
       - uses: actions/cache/save@v4
         with:
+          enableCrossOsArchive: true
           path: core-dist/${{ matrix.artifact }}.tar.gz
           key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.artifact }}
 
@@ -195,10 +197,12 @@ jobs:
     steps:
       - uses: actions/cache/restore@v4
         with:
+          enableCrossOsArchive: true
           path: hiddify-core/hiddify-lib-windows-amd64.tar.gz
           key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-hiddify-lib-windows-amd64
       - uses: actions/cache/restore@v4
         with:
+          enableCrossOsArchive: true
           path: hiddify-core/hiddify-lib-android.tar.gz
           key: core-dist-${{ github.run_id }}-${{ github.run_attempt }}-hiddify-lib-android
       - name: Publish cache release
