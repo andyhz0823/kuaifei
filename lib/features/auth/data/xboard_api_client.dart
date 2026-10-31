@@ -428,8 +428,19 @@ class XboardApiClient with InfraLogger {
   static String normalizeSubscriptionUrl(String url) {
     final normalized = normalizeHttpUrl(url);
     if (normalized.isEmpty) return normalized;
-    final uri = Uri.tryParse(normalized);
+    var uri = Uri.tryParse(normalized);
     if (uri == null || uri.host.isEmpty) return normalized;
+    // 面板会从 subscribe_url 列表里随机挑一个域名下发订阅地址。挑到 apex
+    // （tkya.cc.cd）时，部分网络的 TLS 握手会被中间设备直接打断，订阅就永远
+    // 下载失败、登录后看不到任何配置。面板域名是客户端唯一验证可达的入口，
+    // 所以这里把订阅地址统一收敛到它；历史缓存里的旧域名也会被就地纠正。
+    final panel = Uri.tryParse(Constants.fixedPanelUrl);
+    if (panel != null && panel.host.isNotEmpty) {
+      final host = uri.host.toLowerCase();
+      if (host != panel.host && (host == 'tkya.cc.cd' || host.endsWith('.tkya.cc.cd'))) {
+        uri = uri.replace(scheme: panel.scheme, host: panel.host);
+      }
+    }
     final query = Map<String, String>.from(uri.queryParameters);
     query['flag'] = subscriptionFlag;
     return uri.replace(queryParameters: query).toString();
