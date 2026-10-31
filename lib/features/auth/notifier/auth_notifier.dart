@@ -172,6 +172,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       // Authentication is complete once credentials and subscription metadata
       // are durable. Profile downloads can be slow and must run in background.
       loggy.debug('Auth: login successful for $email');
+      // 登录成功说明至少有一个边缘 IP 可用：清掉冷却已过期的封锁记录，只保留
+      // 当前首选 IP，下次登录直接从它开始。
+      TkyaOrigin.pruneEdgeIpState();
       _scheduleRefreshes();
       unawaited(_syncProfilesAfterLogin());
       return AuthStatus.authenticated;

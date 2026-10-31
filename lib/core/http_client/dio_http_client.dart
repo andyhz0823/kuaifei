@@ -11,7 +11,10 @@ import 'package:hiddify/utils/custom_loggers.dart';
 
 class DioHttpClient with InfraLogger {
   /// Mapped addresses are best effort; stale Cloudflare IPs must not block sync.
-  static const mappedConnectionBudget = Duration(seconds: 2);
+  /// The budget covers the whole rotation, [mappedAddressBudget] covers one
+  /// address, so a single black-holed edge cannot eat the chance to try others.
+  static const mappedConnectionBudget = Duration(seconds: 5);
+  static const mappedAddressBudget = Duration(milliseconds: 1200);
   static const mappedHostFailureCooldown = Duration(minutes: 15);
   // A failed mapped-origin probe must not make each subscription wait through
   // the normal retry chain. Try the public route directly first, then the
@@ -447,13 +450,18 @@ class DioHttpClient with InfraLogger {
       try {
         final remaining = mappedConnectionBudget - stopwatch.elapsed;
         if (remaining <= Duration.zero) break;
-        socket = await Socket.connect(address, uri.port, timeout: remaining);
+        final budget = remaining < mappedAddressBudget ? remaining : mappedAddressBudget;
+        socket = await Socket.connect(address, uri.port, timeout: budget);
         final tlsRemaining = mappedConnectionBudget - stopwatch.elapsed;
         if (tlsRemaining <= Duration.zero) throw TimeoutException('Mapped endpoint connection budget exhausted');
-        return await _secureIfNeeded(uri, socket).timeout(tlsRemaining);
+        final secured = await _secureIfNeeded(uri, socket).timeout(tlsRemaining < budget ? tlsRemaining : budget);
+        // 这个边缘 IP 完成了 TLS，记为首选，下次下载订阅优先使用。
+        TkyaOrigin.recordEdgeIpSuccess(uri.host, address.address);
+        return secured;
       } catch (error) {
         socket?.destroy();
         lastError = error;
+        TkyaOrigin.recordEdgeIpFailure(uri.host, address.address);
       }
     }
     throw SocketException('Unable to connect mapped endpoint for ${uri.host}: $lastError');

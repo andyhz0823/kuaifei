@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
+import 'package:hiddify/core/http_client/edge_probe.dart';
 import 'package:hiddify/core/http_client/tkya_origin.dart';
 import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/features/auth/data/login_doh_resolver.dart';
@@ -15,11 +16,12 @@ class XboardApiClient with InfraLogger {
   static const defaultUserAgent = 'hiddify/4.1.0';
   static const requestTimeout = Duration(seconds: 12);
   // Per-address budget for one TCP connect plus one TLS handshake. A
-  // black-holed Cloudflare edge IP therefore costs ~2s, not the whole request.
-  static const addressConnectBudget = Duration(milliseconds: 2200);
+  // black-holed Cloudflare edge IP therefore costs ~1.2s, not the whole request.
+  static const addressConnectBudget = Duration(milliseconds: 1200);
   // Total budget for the address rotation below. Must stay well under
-  // requestTimeout so a failed transport still reports a real error.
-  static const connectRoundBudget = Duration(milliseconds: 7000);
+  // requestTimeout so a failed transport still reports a real error, while
+  // still covering every pinned edge IP (6 × 1.2s ≈ 7.2s).
+  static const connectRoundBudget = Duration(milliseconds: 9000);
   static const dohResolveBudget = Duration(milliseconds: 2500);
   static const prewarmTimeout = Duration(seconds: 2);
   static const preferredEndpointTimeout = Duration(seconds: 4);
@@ -162,6 +164,11 @@ class XboardApiClient with InfraLogger {
   String? _preferredTransport;
 
   Future<void> prewarm() async {
+    // 边缘 IP 优选（移植自 kuaify v5.0.1）：DNS 被污染时只能靠写死的 IP 兜底，
+    // 但并非每个 CF 边缘都服务本 zone（部分返回 403），所以先探测、只保留真正
+    // 返回 200 且最快的几个，缓存 6 小时。首启最多多花 3s，换来登录成功率。
+    await _ensureEdgeIpProbe();
+
     final cached = TkyaOrigin.addressesForHost(_baseUri.host);
     if (cached.isNotEmpty) {
       loggy.debug('Auth: loaded cached origin routing for ${_baseUri.host}: ${cached.join(', ')}');
@@ -183,6 +190,29 @@ class XboardApiClient with InfraLogger {
             loggy.debug('Auth: DoH prewarm skipped for ${_baseUri.host}: $error');
           }),
     );
+  }
+
+  /// 有可用缓存就直接用；没有（首次启动 / 过期 / 上次探测失败）才重新探测。
+  Future<void> _ensureEdgeIpProbe() async {
+    final host = _baseUri.host;
+    final preferences = _preferences;
+    if (preferences != null) {
+      final cache = EdgeProbe.readCache(preferences);
+      if ((cache[host] ?? const <String>[]).isNotEmpty) return;
+    }
+    try {
+      final probed = await EdgeProbe.probe(
+        Uri.parse('${_baseUri.scheme}://$host/'),
+      ).timeout(const Duration(seconds: 5), onTimeout: () => const <String>[]);
+      if (probed.isEmpty) {
+        loggy.debug('Auth: edge probe found no usable address for $host');
+        return;
+      }
+      await TkyaOrigin.applyProbedAddresses({host: probed});
+      loggy.debug('Auth: edge probe selected for $host: ${probed.join(', ')}');
+    } catch (error) {
+      loggy.debug('Auth: edge probe skipped for $host: $error');
+    }
   }
 
   /// Connects to [uri] trying every known address until one completes TLS.
@@ -213,10 +243,14 @@ class XboardApiClient with InfraLogger {
         Socket? socket;
         try {
           socket = await Socket.connect(address, uri.port, timeout: budget);
-          return await _secureIfNeeded(uri, socket).timeout(budget);
+          final secured = await _secureIfNeeded(uri, socket).timeout(budget);
+          // 记住能完成 TLS 的边缘 IP，下次登录直接用它，避免再从被墙的 IP 试起。
+          TkyaOrigin.recordEdgeIpSuccess(uri.host, address.address);
+          return secured;
         } catch (error) {
           socket?.destroy();
           lastError = error;
+          TkyaOrigin.recordEdgeIpFailure(uri.host, address.address);
         }
       }
       return null;

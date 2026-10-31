@@ -1,7 +1,41 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:hiddify/core/http_client/edge_probe.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// 单个域名下边缘 IP 的健康记录：首选 IP + 当前处于冷却期的封锁 IP。
+class _EdgeIpState {
+  _EdgeIpState();
+
+  String? good;
+  final Map<String, DateTime> blocked = <String, DateTime>{};
+
+  bool get isEmpty => good == null && blocked.isEmpty;
+
+  factory _EdgeIpState.fromJson(dynamic value) {
+    final state = _EdgeIpState();
+    if (value is! Map) return state;
+    final good = value['good'];
+    if (good is String && InternetAddress.tryParse(good) != null) state.good = good;
+    final blocked = value['blocked'];
+    if (blocked is Map) {
+      for (final entry in blocked.entries) {
+        final address = entry.key.toString();
+        if (InternetAddress.tryParse(address) == null) continue;
+        final until = DateTime.tryParse(entry.value.toString());
+        if (until != null) state.blocked[address] = until;
+      }
+    }
+    return state;
+  }
+
+  Map<String, dynamic> toJson() => {
+    if (good != null) 'good': good,
+    'blocked': {for (final entry in blocked.entries) entry.key: entry.value.toIso8601String()},
+  };
+}
 
 class ClientAuthEndpoint {
   const ClientAuthEndpoint({
@@ -235,7 +269,15 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   static const preferenceKey = 'origin_dns_last_known_good_v1';
   static const endpointPoolPreferenceKey = 'auth_endpoint_pool_v1';
   static const lastKnownGoodEndpointPreferenceKey = 'auth_last_known_good_endpoint_v1';
+  // Per-host edge IP health: which address completed TLS last time, and which
+  // ones were terminated. Persisted so the winning IP is tried first next boot.
+  static const edgeIpStatePreferenceKey = 'origin_edge_ip_state_v1';
+  static const edgeIpBlockCooldown = Duration(minutes: 30);
   static OriginDnsConfig _config = const OriginDnsConfig.empty();
+  static SharedPreferences? _preferences;
+  static final Map<String, _EdgeIpState> _edgeIpState = <String, _EdgeIpState>{};
+  // 探测得到的「当前网络真正可用」的边缘 IP（按耗时升序），优先于写死列表。
+  static Map<String, List<String>> _probedAddresses = const {};
 
   static const Map<String, List<String>> githubBootstrapRecords = {
     'github.com': ['20.29.134.23'],
@@ -248,9 +290,17 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   // (~0.45s), 172.67.163.238 completed 1/3 (the other two were terminated
   // during the handshake), and 172.67.163.144 was black-holed. The blocked
   // addresses stay at the end so a future re-route can still reach them.
+  //
+  // 104.17.0.1 / 104.18.0.1 are extra anycast edges that also serve this zone
+  // (verified 2026-10-31 with SNI www.tkya.cc.cd, HTTP 200). They exist because
+  // the zone's own pair can be dropped wholesale by an ISP while a different
+  // Cloudflare range still answers. Runtime success/failure is persisted per
+  // host in [_edgeIpState], so the working address is tried first next time.
   static const List<String> cloudflareEdgeFallbackAddresses = [
     '104.21.50.151',
     '104.21.34.178',
+    '104.17.0.1',
+    '104.18.0.1',
     '172.67.163.238',
     '172.67.163.144',
   ];
@@ -279,6 +329,9 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   static OriginDnsConfig get config => _config;
 
   static void restore(SharedPreferences preferences) {
+    _preferences = preferences;
+    restoreEdgeIpState(preferences);
+    _probedAddresses = EdgeProbe.readCache(preferences);
     final raw = preferences.getString(preferenceKey);
     if (raw == null || raw.isEmpty) return;
     try {
@@ -290,6 +343,7 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   }
 
   static Future<bool> replace(SharedPreferences preferences, OriginDnsConfig next, {bool onlyIfNewer = false}) async {
+    _preferences = preferences;
     if (!next.isUsable) return false;
     if (next.revision < _config.revision) return false;
     if (next.revision == _config.revision) {
@@ -318,6 +372,113 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
     }
 
     return jsonEncode(normalize(value));
+  }
+
+  /// 恢复上次运行记录下来的边缘 IP 健康状态。
+  ///
+  /// 目的很具体：DNS 被污染时客户端只能靠写死的 CF 边缘 IP 登录，而哪些 IP 当
+  /// 前可达会随封锁变化。登录成功后把「能完成 TLS 的那个 IP」记下来，下次启动
+  /// 排到最前面，就不必每次从被墙的 IP 开始重试。
+  static void restoreEdgeIpState(SharedPreferences preferences) {
+    _preferences = preferences;
+    _edgeIpState.clear();
+    final raw = preferences.getString(edgeIpStatePreferenceKey);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      for (final entry in decoded.entries) {
+        final host = normalizeHost(entry.key.toString());
+        if (host == null) continue;
+        final state = _EdgeIpState.fromJson(entry.value);
+        if (!state.isEmpty) _edgeIpState[host] = state;
+      }
+    } catch (_) {
+      // 缓存损坏就丢弃，下一次登录会重新学习。
+    }
+  }
+
+  static String? lastGoodEdgeIpForHost(String host) {
+    final key = normalizeHost(host);
+    if (key == null) return null;
+    return _edgeIpState[key]?.good;
+  }
+
+  static bool isEdgeIpBlocked(String host, String address) {
+    final key = normalizeHost(host);
+    if (key == null) return false;
+    final state = _edgeIpState[key];
+    final until = state?.blocked[address];
+    if (until == null) return false;
+    if (until.isAfter(DateTime.now())) return true;
+    state!.blocked.remove(address);
+    return false;
+  }
+
+  /// 某个边缘 IP 完成了 TLS：记录为首选，并解除它的封锁标记。
+  static void recordEdgeIpSuccess(String host, String address) {
+    final key = normalizeHost(host);
+    if (key == null || address.isEmpty) return;
+    final state = _edgeIpState.putIfAbsent(key, _EdgeIpState.new);
+    final changed = state.good != address || state.blocked.remove(address) != null;
+    state.good = address;
+    if (changed) _persistEdgeIpState();
+  }
+
+  /// 某个边缘 IP 的 TCP/TLS 失败：若它正是首选则撤销，并按冷却期排到队尾。
+  static void recordEdgeIpFailure(String host, String address) {
+    final key = normalizeHost(host);
+    if (key == null || address.isEmpty) return;
+    final state = _edgeIpState.putIfAbsent(key, _EdgeIpState.new);
+    if (state.good == address) state.good = null;
+    state.blocked[address] = DateTime.now().add(edgeIpBlockCooldown);
+    _persistEdgeIpState();
+  }
+
+  /// 登录成功后调用：清掉冷却已过期的封锁记录，只留下仍然有效的偏好。
+  static void pruneEdgeIpState() {
+    final now = DateTime.now();
+    var changed = false;
+    for (final state in _edgeIpState.values) {
+      final expired = state.blocked.entries.where((entry) => !entry.value.isAfter(now)).map((entry) => entry.key).toList();
+      for (final address in expired) {
+        state.blocked.remove(address);
+        changed = true;
+      }
+    }
+    if (changed) _persistEdgeIpState();
+  }
+
+  /// 记录本轮探测结果：写缓存，并作为当前会话的首选地址。
+  static Future<void> applyProbedAddresses(Map<String, List<String>> hosts) async {
+    if (hosts.isEmpty) return;
+    _probedAddresses = Map<String, List<String>>.unmodifiable(<String, List<String>>{..._probedAddresses, ...hosts});
+    final preferences = _preferences;
+    if (preferences != null) await EdgeProbe.writeCache(preferences, _probedAddresses);
+  }
+
+  static void _persistEdgeIpState() {
+    final preferences = _preferences;
+    if (preferences == null) return;
+    final payload = <String, dynamic>{for (final entry in _edgeIpState.entries) entry.key: entry.value.toJson()};
+    unawaited(preferences.setString(edgeIpStatePreferenceKey, jsonEncode(payload)));
+  }
+
+  /// 首选 IP → 未封锁 IP → 已封锁 IP，保持各自原有顺序。
+  static List<String> _prioritizeEdgeAddresses(String host, List<String> addresses) {
+    if (addresses.isEmpty) return addresses;
+    final key = normalizeHost(host);
+    if (key == null) return addresses;
+    final state = _edgeIpState[key];
+    if (state == null) return addresses;
+    final good = state.good;
+    final ordered = <String>[
+      // 上次完成过 TLS 的地址永远排第一，即使它来自 DoH 而不在写死列表里。
+      if (good != null) good,
+      ...addresses.where((address) => address != good && !isEdgeIpBlocked(key, address)),
+      ...addresses.where((address) => address != good && isEdgeIpBlocked(key, address)),
+    ];
+    return List<String>.unmodifiable(ordered);
   }
 
   static List<String> addressesForHost(String host) {
@@ -354,13 +515,33 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   }
 
   static List<String> connectionAddressesForHost(String host) {
-    final configured = addressesForHost(host);
-    if (configured.isNotEmpty) return configured;
     final normalizedHost = normalizeHost(host);
-    if (normalizedHost == null) return const [];
-    final distribution = distributionBootstrapRecords[normalizedHost];
-    if (distribution != null) return distribution;
-    return githubBootstrapRecords[normalizedHost] ?? const [];
+    final base = <String>[];
+    final configured = addressesForHost(host);
+    if (configured.isNotEmpty) {
+      base.addAll(configured);
+    } else if (normalizedHost != null) {
+      final distribution = distributionBootstrapRecords[normalizedHost];
+      final github = githubBootstrapRecords[normalizedHost];
+      if (distribution != null) {
+        base.addAll(distribution);
+      } else if (github != null) {
+        base.addAll(github);
+      }
+    }
+    if (base.isEmpty) return List<String>.unmodifiable(_probedFor(normalizedHost));
+
+    // 探测结果最优先：那是当前网络实测返回 200 且最快的地址；写死列表兜底。
+    final merged = <String>[];
+    for (final address in <String>[..._probedFor(normalizedHost), ...base]) {
+      if (!merged.contains(address)) merged.add(address);
+    }
+    return _prioritizeEdgeAddresses(normalizedHost ?? host, merged);
+  }
+
+  static List<String> _probedFor(String? host) {
+    if (host == null) return const [];
+    return _probedAddresses[host] ?? const [];
   }
 
   static Map<String, List<String>> exportCoreRecords() {
@@ -371,7 +552,12 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
     // Apply built-in records last so hiddify-core follows the same fixed-source
     // precedence as the Dart HTTP clients.
     for (final entry in builtinFallbackRecords.entries) {
-      records[entry.key] = List<String>.unmodifiable(entry.value);
+      final probed = _probedFor(entry.key);
+      final merged = <String>[...probed];
+      for (final address in entry.value) {
+        if (!merged.contains(address)) merged.add(address);
+      }
+      records[entry.key] = List<String>.unmodifiable(_prioritizeEdgeAddresses(entry.key, merged));
     }
     return Map<String, List<String>>.unmodifiable(records);
   }
