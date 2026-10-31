@@ -457,6 +457,19 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
     if (preferences != null) await EdgeProbe.writeCache(preferences, _probedAddresses);
   }
 
+  /// 上次登录成功的端点（通常是分发域 `xz.tkya.cc.cd`）。
+  static String? get lastKnownGoodEndpointUrl {
+    final raw = _preferences?.getString(lastKnownGoodEndpointPreferenceKey);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      final url = decoded is Map ? decoded['url']?.toString() : decoded.toString();
+      return url == null || url.trim().isEmpty ? null : url.trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
   static void _persistEdgeIpState() {
     final preferences = _preferences;
     if (preferences == null) return;

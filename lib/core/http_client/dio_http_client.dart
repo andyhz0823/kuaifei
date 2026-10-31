@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:dio_smart_retry/dio_smart_retry.dart';
 import 'package:hiddify/core/http_client/tkya_origin.dart';
+import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/features/auth/data/login_doh_resolver.dart';
 import 'package:hiddify/utils/custom_loggers.dart';
 
@@ -208,8 +209,14 @@ class DioHttpClient with InfraLogger {
 
     try {
       final fallbackHost = Uri.parse(fallbackUrl).host;
-      loggy.info('Subscription download fallback: using signed endpoint $fallbackHost');
-      return await _fastDirectDio.download(fallbackUrl, path, cancelToken: cancelToken, options: options);
+      loggy.info('Subscription download fallback: rewriting to relay $fallbackHost for ${Uri.tryParse(url)?.host ?? 'panel'}');
+      return await _fastDirectDio.download(
+        fallbackUrl,
+        path,
+        cancelToken: cancelToken,
+        // 分发域靠这个请求头把 /vip/<token> 转回真实面板，路径保持不变。
+        options: _withPanelHost(options, url),
+      );
     } catch (error, stackTrace) {
       if (_isCancelled(error)) rethrow;
       final failedBase = _subscriptionFallbackBaseUrl;
@@ -220,13 +227,43 @@ class DioHttpClient with InfraLogger {
     }
   }
 
+  /// 订阅下载的备用端点候选：固定分发域 → 上次登录成功的端点 → 面板下发端点。
+  ///
+  /// 面板下发的订阅地址域名（如 `www.tkya.cc.cd`）在部分网络会被 TLS 掐断，但
+  /// 登录用的分发域 `xz.tkya.cc.cd` 是通的（日志里它就是 last-known-good）。
+  /// 分发域会按 `X-Tkya-Panel-Host` 把 `/vip/<token>` 转回面板，所以这里把订阅
+  /// 地址整段改写到可用端点上，而不是只在「原域名属于端点池」时才兜底。
+  List<String> _subscriptionFallbackCandidates(Uri uri) {
+    final candidates = <String>[];
+    final seenHosts = <String>{uri.host};
+    void add(String? base) {
+      if (base == null) return;
+      final normalized = base.trim().replaceAll(RegExp(r'/+$'), '');
+      if (normalized.isEmpty || !normalized.startsWith('https://')) return;
+      final host = Uri.tryParse(normalized)?.host;
+      if (host == null || host.isEmpty || !seenHosts.add(host)) return;
+      candidates.add(normalized);
+    }
+
+    add(Constants.distributionBaseUrl);
+    add(TkyaOrigin.lastKnownGoodEndpointUrl);
+    for (final endpoint in TkyaOrigin.config.authEndpoints) {
+      if (endpoint.supportsSubscription) add(endpoint.url);
+    }
+    return candidates;
+  }
+
+  Options _withPanelHost(Options options, String originalUrl) {
+    final host = Uri.tryParse(originalUrl)?.host ?? '';
+    if (host.isEmpty) return options;
+    final headers = Map<String, dynamic>.from(options.headers ?? const <String, dynamic>{})
+      ..['X-Tkya-Panel-Host'] = host;
+    return options.copyWith(headers: headers);
+  }
+
   Future<String?> _resolveSubscriptionFallbackUrl(String url, {required Options options}) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.isScheme('https') || uri.host.isEmpty) return null;
-
-    final endpoints = TkyaOrigin.config.authEndpoints.where((endpoint) => endpoint.supportsSubscription).toList();
-    final knownHosts = endpoints.map((endpoint) => Uri.tryParse(endpoint.url)?.host).whereType<String>().toSet();
-    if (!knownHosts.contains(uri.host)) return null;
 
     final cachedBase = _subscriptionFallbackBaseUrl;
     if (cachedBase != null && Uri.tryParse(cachedBase)?.host != uri.host) {
@@ -239,7 +276,10 @@ class DioHttpClient with InfraLogger {
       return base == null ? null : _replaceSubscriptionBase(uri, base).toString();
     }
 
-    final discovery = _discoverSubscriptionEndpoint(uri, endpoints, options);
+    final candidates = _subscriptionFallbackCandidates(uri);
+    if (candidates.isEmpty) return null;
+
+    final discovery = _discoverSubscriptionEndpoint(uri, candidates, options);
     _subscriptionEndpointDiscovery = discovery;
     try {
       final base = await discovery;
@@ -255,21 +295,15 @@ class DioHttpClient with InfraLogger {
 
   Future<String?> _discoverSubscriptionEndpoint(
     Uri original,
-    List<ClientAuthEndpoint> endpoints,
+    List<String> candidates,
     Options options,
   ) async {
-    final candidates = <String>[];
-    final seenHosts = <String>{original.host};
-    for (final endpoint in endpoints) {
-      final endpointUri = Uri.tryParse(endpoint.url);
-      if (endpointUri == null || !endpointUri.isScheme('https') || !seenHosts.add(endpointUri.host)) continue;
-      candidates.add(endpoint.url);
-    }
     if (candidates.isEmpty) return null;
 
     final completer = Completer<String?>();
     final cancelTokens = <CancelToken>[];
     var remaining = candidates.length;
+    final probeOptions = _withPanelHost(options.copyWith(responseType: ResponseType.bytes), original.toString());
     for (final base in candidates) {
       final candidateUri = _replaceSubscriptionBase(original, base);
       final token = CancelToken();
@@ -279,7 +313,7 @@ class DioHttpClient with InfraLogger {
           await _subscriptionProbeDio.get<List<int>>(
             candidateUri.toString(),
             cancelToken: token,
-            options: options.copyWith(responseType: ResponseType.bytes),
+            options: probeOptions,
           );
           if (!completer.isCompleted) {
             completer.complete(base);

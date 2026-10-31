@@ -3,18 +3,18 @@
   <channel>
     <title>Tkya Release</title>
     <item>
-      <title>Version 1.1.5+10106</title>
+      <title>Version 1.1.6+10107</title>
       <pubDate>Fri, 30 Oct 2026 00:00:00 GMT</pubDate>
       <enclosure
-        url="https://xz.tkya.cc.cd/Downloads/Tkya-v1.1.5-android-arm64-v8a.apk"
-        sparkle:version="1.1.5+10106" sparkle:shortVersionString="1.1.5" sparkle:os="android" />
+        url="https://xz.tkya.cc.cd/Downloads/Tkya-v1.1.6-android-arm64-v8a.apk"
+        sparkle:version="1.1.6+10107" sparkle:shortVersionString="1.1.6" sparkle:os="android" />
     </item>
     <item>
-      <title>Version 1.1.5+10106</title>
+      <title>Version 1.1.6+10107</title>
       <pubDate>Fri, 30 Oct 2026 00:00:00 GMT</pubDate>
       <enclosure
-        url="https://xz.tkya.cc.cd/Downloads/tkya-1.1.5.exe"
-        sparkle:version="1.1.5+10106" sparkle:shortVersionString="1.1.5" sparkle:os="windows" />
+        url="https://xz.tkya.cc.cd/Downloads/tkya-1.1.6.exe"
+        sparkle:version="1.1.6+10107" sparkle:shortVersionString="1.1.6" sparkle:os="windows" />
     </item>
   </channel>
 </rss>
