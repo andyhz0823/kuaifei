@@ -43,6 +43,10 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   @override
   Future<AuthStatus> build() async {
     KuaifyOrigin.restore(_prefs);
+    // S4 迁移：清除历史版本遗留的明文密码（SharedPreferences XML，root 可读）。
+    if (_prefs.containsKey('auth_last_password')) {
+      unawaited(_removePreference('auth_last_password'));
+    }
     // 后台探测 CF 边缘 IP（缓存 6 小时有效），不阻塞启动。
     _warmEdgeCacheIfNeeded();
     ref.onDispose(() {
@@ -76,7 +80,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
 
   String? get lastPanelUrl => _prefs.getString('auth_last_panel_url') ?? _readPanelUrl();
   String? get lastEmail => _prefs.getString('auth_last_email') ?? _readEmail();
-  String? get lastPassword => _prefs.getString('auth_last_password');
+  // S4 修复（5.0.2）：密码不再明文落盘 SharedPreferences。
+  // 历史版本存的 auth_last_password 仍在 prefs 里，启动时主动清除。
+  String? get lastPassword => null;
 
   String get purchaseUrl => _normalizePurchaseUrl(_prefs.getString('auth_purchase_url'));
   String get contactEmail => _normalizeContactEmail(_prefs.getString('auth_contact_email'));
@@ -142,6 +148,16 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
       await _writePreference('auth_email', email);
       await _persistSubscribeResult(subscribeResult);
 
+      // 登录 + getSubscribe 均成功 → 记录「域名 → IP」实录（auth_resolved_endpoints_v1），
+      // 下次 DNS 被污染时可直接用此 IP 连接（SNI 不变）。
+      final loginHost = Uri.tryParse(normalizedUrl)?.host ?? '';
+      if (loginHost.isNotEmpty) {
+        final ips = KuaifyOrigin.addressesForHost(loginHost);
+        if (ips.isNotEmpty) {
+          unawaited(KuaifyOrigin.recordAuthResolvedEndpoint(_prefs, loginHost, ips.first));
+        }
+      }
+
       // Authentication is complete once credentials and subscription metadata
       // are durable. Profile downloads can be slow and must run in background.
       loggy.debug('Auth: login successful for $email');
@@ -165,7 +181,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
   }) async {
     await _writePreference('auth_last_panel_url', panelUrl);
     await _writePreference('auth_last_email', email);
-    await _writePreference('auth_last_password', password);
+    // S4 修复（5.0.2）：不再保存密码到 SharedPreferences（明文 XML，任何 root 应用可读）。
+    // 同时清除历史版本遗留的明文密码。
+    await _removePreference('auth_last_password');
   }
 
   Future<void> _persistSubscribeResult(XboardSubscribeResult subscribeResult) async {
@@ -326,7 +344,9 @@ class AuthNotifier extends AsyncNotifier<AuthStatus> with AppLogger {
     final panelUrl = _readPanelUrl();
     final token = _readSubscriptionToken();
     if (panelUrl == null || token == null) return null;
-    return XboardApiClient.normalizeSubscriptionUrl('$panelUrl/s/$token');
+    // S8 修复（5.0.2）：面板 subscribe_path=vip，兜底路径必须是 /vip/ 而非 /s/。
+    // /s/ 是 Xboard 默认路径，本面板已改为 /vip/（nginx location ^~ /vip/）。
+    return XboardApiClient.normalizeSubscriptionUrl('$panelUrl/vip/$token');
   }
 
   List<XboardSubscriptionProfile> get subscriptionProfiles {

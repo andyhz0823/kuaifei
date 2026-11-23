@@ -142,7 +142,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", required=True, help="Release 标签，例如 v4.1.14")
     ap.add_argument("--repo", required=True, help="owner/name")
-    ap.add_argument("--base-url", required=True, help="分发基址，例如 https://xz.kuaity.top/Downloads")
+    ap.add_argument("--base-url", required=True, help="分发基址，例如 https://xz.kuaify.cc.cd/Downloads")
     ap.add_argument("--out", required=True, help="清单输出目录")
     ap.add_argument(
         "--require-assets",

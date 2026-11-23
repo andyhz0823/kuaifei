@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:hiddify/core/http_client/edge_probe.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,11 +27,13 @@ class ClientAuthEndpoint {
 
   factory ClientAuthEndpoint.fromJson(dynamic value) {
     if (value is String) {
-      return ClientAuthEndpoint(id: value, url: value, type: 'worker', priority: 100, capabilities: const ['api']);
+      final expanded = expandRandTemplate(value);
+      return ClientAuthEndpoint(id: expanded, url: expanded, type: 'worker', priority: 100, capabilities: const ['api']);
     }
     if (value is! Map) return const ClientAuthEndpoint.empty();
     final json = Map<String, dynamic>.from(value);
-    final normalizedUrl = _normalizeUrl(json['url']?.toString() ?? '');
+    final rawUrl = json['url']?.toString() ?? '';
+    final normalizedUrl = _normalizeUrl(expandRandTemplate(rawUrl));
     final rawCapabilities = json['capabilities'];
     // JSON decoding produces List<dynamic>. Build a typed list explicitly so
     // List<String>.unmodifiable never performs an unsafe runtime cast.
@@ -80,6 +83,28 @@ class ClientAuthEndpoint {
     'enabled': true,
     'capabilities': capabilities,
   };
+
+  /// 展开面板下发的 `[randN]` 随机子域模板。
+  ///
+  /// 面板端 `Helper::replaceByPattern` 会把 `[rand9].kuaify.cc.cd` 展开为
+  /// `ab12cd34e.kuaify.cc.cd` 之类的随机子域（抗封锁）。客户端在解析
+  /// `auth_endpoints` 时也要能识别并展开同样的模板，否则拿到的是
+  /// 字面量 `[rand9].kuaify.cc.cd`——无法解析、无法连接。
+  ///
+  /// 规则：`[randN]` → N 位小写字母+数字随机串（N 取 1~32）。
+  /// 整个 URL 中出现多次时各自独立展开。展开结果不含 `[`/`]`。
+  static String expandRandTemplate(String url) {
+    if (!url.contains('[rand')) return url;
+    final rand = Random.secure();
+    const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    return url.replaceAllMapped(RegExp(r'\[rand(\d{1,2})\]'), (match) {
+      final length = int.tryParse(match.group(1) ?? '') ?? 8;
+      final n = length.clamp(1, 32);
+      return String.fromCharCodes(
+        List.generate(n, (_) => alphabet.codeUnitAt(rand.nextInt(alphabet.length))),
+      );
+    });
+  }
 
   static String _normalizeUrl(String value) {
     final trimmed = value.trim();
@@ -295,8 +320,10 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
 
   // These are Cloudflare edge addresses, not the origin server. The original URI
   // host remains in use for TLS SNI and the HTTP Host header.
+  // 2026-11-24: xz.kuaity.top → xz.kuaify.cc.cd（107 kuaify 线自有分发域）。
   static const Map<String, List<String>> distributionBootstrapRecords = {
-    'xz.kuaity.top': cloudflareEdgeFallbackAddresses,
+    'xz.kuaify.cc.cd': cloudflareEdgeFallbackAddresses,
+    '*.kuaify.cc.cd': cloudflareEdgeFallbackAddresses,
   };
 
   // The primary panel domain must remain reachable even if DNS, Cloudflare,
@@ -326,6 +353,7 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   static void restore(SharedPreferences preferences) {
     // 先恢复自动优选的边缘 IP：它比写死的两个更贴合当前网络。
     _probedEdges = EdgeProbe.readCache(preferences);
+    _restoreAuthResolved(preferences);
     final raw = preferences.getString(preferenceKey);
     if (raw == null || raw.isEmpty) return;
     try {
@@ -334,6 +362,83 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
     } catch (_) {
       // A malformed cache is ignored and replaced after the next successful sync.
     }
+  }
+
+  // ── auth_resolved_endpoints_v1 ──────────────────────────────────────────
+  // 登录 / 获取订阅成功后，把「域名 → 实际连接 IP」实录下来。
+  // 下次即使 DNS 被污染，也能直接用上次成功的 IP 连接（SNI / Host 头不变）。
+  // 30 天过期自动清理。写入前调用方应确认连接已验证（HTTP 200）。
+
+  static const authResolvedPreferenceKey = 'auth_resolved_endpoints_v1';
+  static const _authResolvedTtl = Duration(days: 30);
+  static Map<String, _AuthResolvedEntry> _authResolved = {};
+
+  static void _restoreAuthResolved(SharedPreferences preferences) {
+    final raw = preferences.getString(authResolvedPreferenceKey);
+    if (raw == null || raw.isEmpty) {
+      _authResolved = {};
+      return;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) {
+        _authResolved = {};
+        return;
+      }
+      final now = DateTime.now();
+      final restored = <String, _AuthResolvedEntry>{};
+      for (final entry in decoded.entries) {
+        final host = entry.key.toString();
+        final value = entry.value;
+        if (value is! Map) continue;
+        final ip = value['ip']?.toString() ?? '';
+        final ts = value['ts'] is num ? (value['ts'] as num).toInt() : 0;
+        if (ip.isEmpty || ts <= 0) continue;
+        final recordedAt = DateTime.fromMillisecondsSinceEpoch(ts);
+        if (now.difference(recordedAt) > _authResolvedTtl) continue;
+        restored[host] = _AuthResolvedEntry(ip: ip, recordedAt: recordedAt);
+      }
+      _authResolved = restored;
+    } catch (_) {
+      _authResolved = {};
+    }
+  }
+
+  /// 记录一次成功的「域名 → IP」连接实录。调用时机：登录成功 / getSubscribe 成功。
+  /// [ip] 是实际建立 TCP 连接的远端 IP（非 DNS 解析结果，而是 Socket 远端地址）。
+  static Future<void> recordAuthResolvedEndpoint(
+    SharedPreferences preferences,
+    String host,
+    String ip,
+  ) async {
+    final normalizedHost = normalizeHost(host);
+    if (normalizedHost == null || ip.trim().isEmpty) return;
+    final trimmedIp = ip.trim();
+    // 只接受合法 IPv4 / IPv6 字面量
+    if (InternetAddress.tryParse(trimmedIp) == null) return;
+    _authResolved[normalizedHost] = _AuthResolvedEntry(ip: trimmedIp, recordedAt: DateTime.now());
+    await _persistAuthResolved(preferences);
+  }
+
+  static Future<void> _persistAuthResolved(SharedPreferences preferences) async {
+    final map = <String, dynamic>{};
+    for (final entry in _authResolved.entries) {
+      map[entry.key] = {'ip': entry.value.ip, 'ts': entry.value.recordedAt.millisecondsSinceEpoch};
+    }
+    await preferences.setString(authResolvedPreferenceKey, jsonEncode(map));
+  }
+
+  /// 返回 [host] 上次成功连接的 IP（若有且未过期），否则返回 null。
+  static String? authResolvedIpForHost(String host) {
+    final normalizedHost = normalizeHost(host);
+    if (normalizedHost == null) return null;
+    final entry = _authResolved[normalizedHost];
+    if (entry == null) return null;
+    if (DateTime.now().difference(entry.recordedAt) > _authResolvedTtl) {
+      _authResolved.remove(normalizedHost);
+      return null;
+    }
+    return entry.ip;
   }
 
   /// 对每个备用入口探测一批 CF 边缘 IP，挑当前网络**真正可用**（HTTP 200）且最快的
@@ -401,6 +506,14 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
 
   static List<String> addressesForHost(String host) {
     final normalizedHost = normalizeHost(host);
+    // 登录/连接成功实录最优先：这是本机**实际用过且成功**的 IP，
+    // 比探测结果更可信，且 DNS 被污染时它是唯一可用线索。
+    if (normalizedHost != null) {
+      final authResolved = _authResolved[normalizedHost];
+      if (authResolved != null && DateTime.now().difference(authResolved.recordedAt) <= _authResolvedTtl) {
+        return [authResolved.ip];
+      }
+    }
     // 自动优选结果优先（按 host 分别缓存）：写死的边缘 IP 在某些网络下会被墙/绕路，
     // 探测出来的这组是当前网络实测 200 且最快的。
     if (normalizedHost != null) {
@@ -550,4 +663,11 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
     }
     return addresses.toList(growable: false);
   }
+}
+
+/// 登录/连接成功实录条目：host → 实际连接 IP + 时间戳。
+class _AuthResolvedEntry {
+  const _AuthResolvedEntry({required this.ip, required this.recordedAt});
+  final String ip;
+  final DateTime recordedAt;
 }

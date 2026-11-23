@@ -3,7 +3,7 @@
 ; 🔴 不要再把版本号写死在这里：5.0.0 那次就是因为写死 5.0.1，
 ;    产物名变成 kuaify-5.0.1.exe，而工作流按 pubspec 找 kuaify-5.0.0.exe 才失败。
 #ifndef MyAppVersion
-  #define MyAppVersion "5.0.1"
+  #define MyAppVersion "5.0.2"
 #endif
 #ifndef MyAppBuild
   #define MyAppBuild "2"

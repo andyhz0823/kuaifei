@@ -27,7 +27,9 @@ abstract class Constants {
   static const backupBootstrapUrl = "$backupPanelBaseUrl/api/v1/guest/client/bootstrap";
 
   // 安装包 / 更新清单的公共 CDN。只承载文件，**不参与面板身份判定**。
-  static const distributionBaseUrl = "https://xz.kuaity.top";
+  // 2026-11-24：从 xz.kuaity.top（216 kuaifei 线）换到 xz.kuaify.cc.cd（107 kuaify 线），
+  // 由 107 的 nginx 静态 vhost 提供，域名归属与品牌一致。
+  static const distributionBaseUrl = "https://xz.kuaify.cc.cd";
   static const updateManifestUrl = "$distributionBaseUrl/Downloads/latest.json";
   static const windowsUpdateManifestUrl = "$distributionBaseUrl/Downloads/latest-windows.json";
   static const appCastUrl = "$distributionBaseUrl/Downloads/appcast.xml";

@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  把已发布的 Kuaifei GitHub Release 投放到客户端更新通道（xz.kuaity.top/Downloads）。
+  把已发布的 Kuaifei GitHub Release 投放到客户端更新通道（xz.kuaify.cc.cd/Downloads）。
 
 .DESCRIPTION
   本地手动执行版 —— 仓库内不保存任何服务器私钥。
@@ -37,7 +37,7 @@ param(
   [string]$DeployUser = 'root',
   [int]$SshPort = 22,
   [string]$RemotePath = '/www/wwwroot/kuaifei.top/Downloads',
-  [string]$BaseUrl = 'https://xz.kuaity.top/Downloads',
+  [string]$BaseUrl = 'https://xz.kuaify.cc.cd/Downloads',
   [string]$PythonExe = '',
   [switch]$SkipVerify
 )
