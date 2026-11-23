@@ -47,12 +47,28 @@ class EdgeProbe {
 
   /// 对每个候选 IP 发一次真实 HTTPS 请求（[probeUri]，通常是 bootstrap 接口），
   /// 只有返回 200 的才算可用，再按耗时排序取最快的 [keep] 个。
+  ///
+  /// 🔴 必须分批探测（每批 [_batchSize] 个、间隔 [_batchDelay]）：
+  /// 一次性并发 15 个请求会打爆 CF/nginx 的 `abuse_api` 限流（12r/s burst=40），
+  /// 导致后续登录请求全部 429（v5.0.2 翻车实录）。
+  static const _batchSize = 5;
+  static const _batchDelay = Duration(milliseconds: 300);
+
   static Future<List<String>> probe(Uri probeUri, {int keep = keepCount}) async {
     if (probeUri.scheme != 'https' || probeUri.host.isEmpty) return const [];
 
-    final results = await Future.wait(
-      candidateAddresses.map((address) async => MapEntry(address, await _probeMs(address, probeUri))),
-    );
+    final results = <MapEntry<String, int>>[];
+    for (var i = 0; i < candidateAddresses.length; i += _batchSize) {
+      final batch = candidateAddresses.skip(i).take(_batchSize);
+      final batchResults = await Future.wait(
+        batch.map((address) async => MapEntry(address, await _probeMs(address, probeUri))),
+      );
+      results.addAll(batchResults);
+      // 最后一批不需要等待
+      if (i + _batchSize < candidateAddresses.length) {
+        await Future<void>.delayed(_batchDelay);
+      }
+    }
 
     final reachable = results.where((entry) => entry.value >= 0).toList()
       ..sort((left, right) => left.value.compareTo(right.value));

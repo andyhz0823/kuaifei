@@ -408,16 +408,37 @@ class XboardApiClient with InfraLogger {
     String transport,
     Future<Response<dynamic>> Function(Dio dio, CancelToken cancelToken) request,
   ) async {
-    final cancelToken = CancelToken();
-    try {
-      final response = await request(_dioFor(transport), cancelToken).timeout(requestTimeout);
-      _preferredTransport = transport;
-      _rememberSuccessfulEndpoint(transport);
-      loggy.debug('Auth: $transport path succeeded');
-      return response;
-    } finally {
-      if (!cancelToken.isCancelled) cancelToken.cancel('auth request completed');
+    // 429 限流自动重试：CF/nginx 的 abuse_api 限流（12r/s burst=40）可能因
+    // 边缘探测等后台请求瞬间耗尽 burst 配额，导致登录请求被 429。
+    // 等 2 秒后重试一次，通常能恢复（burst 桶已回填）。
+    Object? lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        loggy.info('Auth: $transport got rate-limited (429), retrying in 2s...');
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+      final cancelToken = CancelToken();
+      try {
+        final response = await request(_dioFor(transport), cancelToken).timeout(requestTimeout);
+        _preferredTransport = transport;
+        _rememberSuccessfulEndpoint(transport);
+        loggy.debug('Auth: $transport path succeeded');
+        return response;
+      } catch (error) {
+        lastError = error;
+        if (!_isRateLimited(error)) rethrow;
+      } finally {
+        if (!cancelToken.isCancelled) cancelToken.cancel('auth request completed');
+      }
     }
+    throw lastError!;
+  }
+
+  static bool _isRateLimited(Object error) {
+    if (error is DioException) {
+      return error.response?.statusCode == 429;
+    }
+    return false;
   }
 
   Future<Response<dynamic>> _raceTransports(
@@ -450,12 +471,30 @@ class XboardApiClient with InfraLogger {
       }
     }
 
+    Future<void> sendWithRetry(String transport) async {
+      Object? lastError;
+      StackTrace? lastStack;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) {
+          await Future<void>.delayed(const Duration(seconds: 2));
+        }
+        final token = cancelTokens[transport];
+        if (token == null || token.isCancelled) return;
+        try {
+          final response = await request(_dioFor(transport), token).timeout(requestTimeout);
+          completeSuccess(transport, response);
+          return;
+        } catch (error, stackTrace) {
+          lastError = error;
+          lastStack = stackTrace;
+          if (!_isRateLimited(error)) break;
+        }
+      }
+      if (lastError != null) completeFailure(lastError, lastStack ?? StackTrace.current);
+    }
+
     for (final entry in cancelTokens.entries) {
-      final transport = entry.key;
-      request(
-        _dioFor(transport),
-        entry.value,
-      ).timeout(requestTimeout).then((response) => completeSuccess(transport, response), onError: completeFailure);
+      unawaited(sendWithRetry(entry.key));
     }
 
     return completer.future;
