@@ -355,12 +355,10 @@ class DioHttpClient with InfraLogger {
     } catch (error, stackTrace) {
       if (_isCancelled(error)) rethrow;
       if (_isMappedEdgeRejection(error)) {
-        // 边缘 IP 能握手但被 CF 拒（403 / 52x）：说明自动优选出来的这组 IP
-        // 对这个 zone 不可用，立刻丢弃并冷却，改走正常解析。
-        KuaifyOrigin.clearEdgeCache();
+        // 边缘 IP 能握手但被 CF 拒（403 / 52x）：冷却一段时间，改走正常解析。
         final retryAt = DateTime.now().add(mappedHostFailureCooldown);
         _mappedHostUnavailableUntil[host] = retryAt;
-        loggy.warning('Mapped $action rejected by edge for $host; cleared preferred edge IPs until $retryAt');
+        loggy.warning('Mapped $action rejected by edge for $host; cooling down until $retryAt');
         return null;
       }
       if (_isMappedConnectionFailure(error)) {

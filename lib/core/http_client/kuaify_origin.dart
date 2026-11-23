@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:hiddify/core/http_client/edge_probe.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ClientAuthEndpoint {
@@ -271,10 +270,6 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   static const lastKnownGoodEndpointPreferenceKey = 'auth_last_known_good_endpoint_v2';
   static OriginDnsConfig _config = const OriginDnsConfig.empty();
 
-  /// 自动优选出来的 CF 边缘 IP：host -> 按当前网络耗时排序的地址列表。
-  /// 命中时优先于写死的 [builtinFallbackRecords]。
-  static Map<String, List<String>> _probedEdges = const {};
-
   /// 属于本品牌的域名后缀。服务端下发的端点只要不在此列一律丢弃。
   ///
   /// 这条白名单是「登录被带到别的品牌面板」的最终兜底：216（kuaifei 线）会把
@@ -351,8 +346,6 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
   static OriginDnsConfig get config => _config;
 
   static void restore(SharedPreferences preferences) {
-    // 先恢复自动优选的边缘 IP：它比写死的两个更贴合当前网络。
-    _probedEdges = EdgeProbe.readCache(preferences);
     _restoreAuthResolved(preferences);
     final raw = preferences.getString(preferenceKey);
     if (raw == null || raw.isEmpty) return;
@@ -441,34 +434,6 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
     return entry.ip;
   }
 
-  /// 对每个备用入口探测一批 CF 边缘 IP，挑当前网络**真正可用**（HTTP 200）且最快的
-  /// 几个缓存起来（6 小时有效）。
-  ///
-  /// 按 host 分别探测：`www.kuaify.cc.cd` 与 `by.tkya.us.ci` 解析到不同边缘，
-  /// 一个域名整域被墙时另一个仍可能通。
-  static Future<void> refreshEdgeCache(SharedPreferences preferences, {required List<Uri> probeUris}) async {
-    if (probeUris.isEmpty) return;
-    try {
-      final results = <String, List<String>>{};
-      for (final probeUri in probeUris) {
-        final best = await EdgeProbe.probe(probeUri);
-        if (best.isNotEmpty) results[probeUri.host] = best;
-      }
-      if (results.isEmpty) return;
-      _probedEdges = Map<String, List<String>>.unmodifiable(results);
-      await EdgeProbe.writeCache(preferences, _probedEdges);
-    } catch (_) {
-      // 探测失败就继续用写死的兜底地址。
-    }
-  }
-
-  /// 优选结果被边缘拒绝（403/521 等）时清掉，立刻回到写死的兜底地址。
-  static void clearEdgeCache() {
-    _probedEdges = const {};
-  }
-
-  static bool get hasProbedEdgeAddresses => _probedEdges.isNotEmpty;
-
   static Future<bool> replace(SharedPreferences preferences, OriginDnsConfig next, {bool onlyIfNewer = false}) async {
     if (!next.isUsable) return false;
     if (next.revision < _config.revision) return false;
@@ -513,12 +478,6 @@ MOz2U0OBSif3FTkhCgZWQKOOLo1P42jHC3ssUZAtVNXrCk3fw9/E15k8NPkBazZ6
       if (authResolved != null && DateTime.now().difference(authResolved.recordedAt) <= _authResolvedTtl) {
         return [authResolved.ip];
       }
-    }
-    // 自动优选结果优先（按 host 分别缓存）：写死的边缘 IP 在某些网络下会被墙/绕路，
-    // 探测出来的这组是当前网络实测 200 且最快的。
-    if (normalizedHost != null) {
-      final probed = _probedEdges[normalizedHost];
-      if (probed != null && probed.isNotEmpty) return probed;
     }
     // The fixed primary-origin route intentionally wins over remotely supplied
     // records, preventing a stale cache from routing the panel back to an
