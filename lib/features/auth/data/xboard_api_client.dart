@@ -481,7 +481,10 @@ class XboardApiClient with InfraLogger {
       errors.add(error);
       pending -= 1;
       if (pending == 0) {
-        completer.completeError(errors.isEmpty ? error : errors.last, stackTrace);
+        // 优先传播带面板业务消息的 DioException（如 400/429 的错误消息），
+        // 而不是随意取 errors.last（可能是 TimeoutException 等网络错误）。
+        final withBody = errors.whereType<DioException>().where((e) => e.response != null).lastOrNull;
+        completer.completeError(withBody ?? errors.last, stackTrace);
       }
     }
 

@@ -174,8 +174,16 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     if (error.contains('登录失败，请修改面板域名前缀')) {
       return '登录失败，请检查网络后重试';
     }
-    if (error.contains('DioException')) {
+    // 业务错误消息（密码错误、账号被锁等）直接透传，不做替换。
+    // 只有纯网络层 DioException（无业务响应体）才提示网络错误。
+    if (error.contains('DioException') && !error.contains('Exception [bad response]')) {
       return '登录失败，请检查网络后重试';
+    }
+    // DioException [bad response] 带面板业务消息（如"邮箱或密码错误"），提取实际消息
+    if (error.contains('DioException [bad response]')) {
+      final msgMatch = RegExp(r'"message"\s*:\s*"([^"]+)"').firstMatch(error);
+      if (msgMatch != null) return msgMatch.group(1)!;
+      return '登录失败，请重试';
     }
     if (error.contains('DoH failed')) {
       return 'DNS解析失败，请检查网络后重试';
