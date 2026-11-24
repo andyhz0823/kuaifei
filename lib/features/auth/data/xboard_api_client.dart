@@ -253,6 +253,28 @@ class XboardApiClient with InfraLogger {
     }
   }
 
+  /// 从 DioException 的响应体中提取 JSON body。
+  /// 面板的业务错误（如 429 密码错误次数过多）响应体是 JSON，
+  /// 但 Dio 默认会把非 2xx 抛为 DioException 而非正常 Response。
+  Map<String, dynamic>? _dioErrorBody(DioException error) {
+    try {
+      final data = error.response?.data;
+      if (data is Map<String, dynamic>) return data;
+      if (data is Map) return Map<String, dynamic>.from(data);
+      if (data is List<int>) {
+        final decoded = jsonDecode(utf8.decode(data));
+        if (decoded is Map<String, dynamic>) return decoded;
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      }
+      if (data is String && data.isNotEmpty) {
+        final decoded = jsonDecode(data);
+        if (decoded is Map<String, dynamic>) return decoded;
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Map<String, dynamic>? _responseBody(Response<dynamic> response) {
     final body = response.data;
     if (body is Map<String, dynamic>) return body;
@@ -271,13 +293,26 @@ class XboardApiClient with InfraLogger {
   }
 
   Future<XboardLoginResult> login({required String email, required String password}) async {
-    final response = await _requestWithOriginFallback(
-      (dio, cancelToken) => dio.post(
-        '/api/v1/passport/auth/login',
-        data: {'email': email, 'password': password},
-        cancelToken: cancelToken,
-      ),
-    );
+    final Response<dynamic> response;
+    try {
+      response = await _requestWithOriginFallback(
+        (dio, cancelToken) => dio.post(
+          '/api/v1/passport/auth/login',
+          data: {'email': email, 'password': password},
+          cancelToken: cancelToken,
+        ),
+      );
+    } on DioException catch (error) {
+      // 面板可能返回 429（密码错误次数过多）等业务错误码，
+      // Dio 默认会抛 DioException 而非正常 Response。
+      // 从响应体中提取面板的实际错误消息，而不是显示"网络错误"。
+      final body = _dioErrorBody(error);
+      final message = body?['message']?.toString();
+      if (message != null && message.isNotEmpty) {
+        throw XboardApiException(message);
+      }
+      rethrow;
+    }
 
     final body = _responseBody(response);
     if (body == null || body['status'] != 'success') {
@@ -408,37 +443,16 @@ class XboardApiClient with InfraLogger {
     String transport,
     Future<Response<dynamic>> Function(Dio dio, CancelToken cancelToken) request,
   ) async {
-    // 429 限流自动重试：CF/nginx 的 abuse_api 限流（12r/s burst=40）可能因
-    // 边缘探测等后台请求瞬间耗尽 burst 配额，导致登录请求被 429。
-    // 等 2 秒后重试一次，通常能恢复（burst 桶已回填）。
-    Object? lastError;
-    for (var attempt = 0; attempt < 2; attempt++) {
-      if (attempt > 0) {
-        loggy.info('Auth: $transport got rate-limited (429), retrying in 2s...');
-        await Future<void>.delayed(const Duration(seconds: 2));
-      }
-      final cancelToken = CancelToken();
-      try {
-        final response = await request(_dioFor(transport), cancelToken).timeout(requestTimeout);
-        _preferredTransport = transport;
-        _rememberSuccessfulEndpoint(transport);
-        loggy.debug('Auth: $transport path succeeded');
-        return response;
-      } catch (error) {
-        lastError = error;
-        if (!_isRateLimited(error)) rethrow;
-      } finally {
-        if (!cancelToken.isCancelled) cancelToken.cancel('auth request completed');
-      }
+    final cancelToken = CancelToken();
+    try {
+      final response = await request(_dioFor(transport), cancelToken).timeout(requestTimeout);
+      _preferredTransport = transport;
+      _rememberSuccessfulEndpoint(transport);
+      loggy.debug('Auth: $transport path succeeded');
+      return response;
+    } finally {
+      if (!cancelToken.isCancelled) cancelToken.cancel('auth request completed');
     }
-    throw lastError!;
-  }
-
-  static bool _isRateLimited(Object error) {
-    if (error is DioException) {
-      return error.response?.statusCode == 429;
-    }
-    return false;
   }
 
   Future<Response<dynamic>> _raceTransports(
@@ -471,30 +485,12 @@ class XboardApiClient with InfraLogger {
       }
     }
 
-    Future<void> sendWithRetry(String transport) async {
-      Object? lastError;
-      StackTrace? lastStack;
-      for (var attempt = 0; attempt < 2; attempt++) {
-        if (attempt > 0) {
-          await Future<void>.delayed(const Duration(seconds: 2));
-        }
-        final token = cancelTokens[transport];
-        if (token == null || token.isCancelled) return;
-        try {
-          final response = await request(_dioFor(transport), token).timeout(requestTimeout);
-          completeSuccess(transport, response);
-          return;
-        } catch (error, stackTrace) {
-          lastError = error;
-          lastStack = stackTrace;
-          if (!_isRateLimited(error)) break;
-        }
-      }
-      if (lastError != null) completeFailure(lastError, lastStack ?? StackTrace.current);
-    }
-
     for (final entry in cancelTokens.entries) {
-      unawaited(sendWithRetry(entry.key));
+      final transport = entry.key;
+      request(
+        _dioFor(transport),
+        entry.value,
+      ).timeout(requestTimeout).then((response) => completeSuccess(transport, response), onError: completeFailure);
     }
 
     return completer.future;
